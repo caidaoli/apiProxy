@@ -37,22 +37,27 @@
         <div class="chart-section">
             <div class="chart-header">
                 <h2 class="chart-title">📊 API调用统计图表</h2>
-                <div class="time-tabs">
-                    <button class="time-tab active" data-period="today">24小时</button>
-                    <button class="time-tab" data-period="week">7天</button>
-                    <button class="time-tab" data-period="month">30天</button>
-                    <button class="time-tab" data-period="total">总计</button>
+                <div class="chart-controls">
+                    <div class="endpoint-selector">
+                        <label for="endpointSelect">选择端点：</label>
+                        <select id="endpointSelect" class="endpoint-select">
+                            <option value="all">全部端点</option>
+                        </select>
+                    </div>
+                    <div class="time-tabs">
+                        <button class="time-tab active" data-period="today">24小时</button>
+                        <button class="time-tab" data-period="week">7天</button>
+                        <button class="time-tab" data-period="month">30天</button>
+                        <button class="time-tab" data-period="total">总计</button>
+                    </div>
                 </div>
             </div>
             <div class="chart-info">
-                <p>📊 组合图表：蓝色柱状图显示总API调用次数，红色折线图显示总体调用趋势。选择上方时间范围查看不同维度数据。</p>
+                <p id="chartInfoText">📊 组合图表：蓝色柱状图显示总API调用次数，红色折线图显示总体调用趋势。选择上方时间范围查看不同维度数据。</p>
             </div>
-            <div class="chart-grid">
+            <div class="chart-container-wrapper">
                 <div class="chart-container">
                     <canvas id="apiChart"></canvas>
-                </div>
-                <div>
-                    <div class="chart-legend" id="chartLegend"></div>
                 </div>
             </div>
         </div>
@@ -123,22 +128,20 @@ https://api.anthropic.com/v1/messages
                     <li>🧹 <strong>自动清理</strong>：定期清理过期数据释放内存</li>
                     <li>✅ 支持所有HTTP方法和CORS跨域请求</li>
                     <li>✅ 实时性能监控和错误率统计</li>
-                    <li>✅ 代理模式支持完整网页浏览</li>
-                    <li>✅ Gemini NoThink模式自动禁用思考模式</li>
+                    <li>✅ 完全透明代理,不修改请求和响应内容</li>
                 </ul>
             </div>
             
             <div class="example-section">
-                <h3>⚡ 特性</h3>
+                <h3>⚡ 透明代理特性</h3>
                 <ul style="margin-left: 20px; color: #666; line-height: 1.6;">
                     <li>✅ 支持所有HTTP方法 (GET, POST, PUT, DELETE等)</li>
-                    <li>✅ 自动转发请求头和响应头</li>
+                    <li>✅ 完全透明转发请求头和响应头(符合RFC 7230)</li>
+                    <li>✅ 不修改请求和响应内容,保持原样</li>
                     <li>✅ 支持CORS跨域请求</li>
                     <li>✅ 实时统计API调用次数</li>
-                    <li>✅ 代理模式支持完整网页浏览</li>
                     <li>✅ 自动获取当前域名，无需手动配置</li>
                     <li>✅ 组合图表展示调用统计和趋势</li>
-                    <li>✅ Gemini NoThink模式：自动为Gemini请求添加thinkingBudget: 0禁用思考模式</li>
                 </ul>
             </div>
             
@@ -168,6 +171,7 @@ https://api.anthropic.com/v1/messages
         let rawStatsData = null;
         let chartInstance = null;
         let currentPeriod = 'today';
+        let currentEndpoint = 'all';
         let currentDomain = '';
         const barColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#64748b', '#14b8a6', '#a855f7', '#eab308', '#22c55e', '#3b82f6'];
 
@@ -229,19 +233,7 @@ https://api.anthropic.com/v1/messages
 
         // 渲染统计卡片
         function renderStatsCards(data) {
-            const getStats = (endpoint) => {
-                if (data.endpoints && data.endpoints[endpoint]) {
-                    return data.endpoints[endpoint];
-                }
-                return { total: 0, today: 0, week: 0, month: 0 };
-            };
-
-            const cerebrasStats = getStats('/cerebras');
-            const geminiStats = getStats('/gemini');
-            const claudeStats = getStats('/claude');
-            const xaiStats = getStats('/xai');
-
-            const activeEndpoints = Object.keys(data.endpoints || {}).filter(k => 
+            const activeEndpoints = Object.keys(data.endpoints || {}).filter(k =>
                 data.endpoints[k].total > 0
             ).length;
 
@@ -278,34 +270,6 @@ https://api.anthropic.com/v1/messages
 
             document.getElementById('stats-grid').innerHTML = `
                 <div class="stat-card">
-                    <h3><div class="api-icon openai-icon">C</div>Cerebras API 调用统计</h3>
-                    <div class="stat-row"><span class="stat-label">24小时</span><span class="stat-value">${cerebrasStats.today}</span></div>
-                    <div class="stat-row"><span class="stat-label">7天</span><span class="stat-value">${cerebrasStats.week}</span></div>
-                    <div class="stat-row"><span class="stat-label">30天</span><span class="stat-value">${cerebrasStats.month}</span></div>
-                    <div class="stat-row"><span class="stat-label">总计</span><span class="stat-value">${cerebrasStats.total}</span></div>
-                </div>
-                <div class="stat-card">
-                    <h3><div class="api-icon gemini-icon">G</div>Gemini API 调用统计</h3>
-                    <div class="stat-row"><span class="stat-label">24小时</span><span class="stat-value">${geminiStats.today}</span></div>
-                    <div class="stat-row"><span class="stat-label">7天</span><span class="stat-value">${geminiStats.week}</span></div>
-                    <div class="stat-row"><span class="stat-label">30天</span><span class="stat-value">${geminiStats.month}</span></div>
-                    <div class="stat-row"><span class="stat-label">总计</span><span class="stat-value">${geminiStats.total}</span></div>
-                </div>
-                <div class="stat-card">
-                    <h3><div class="api-icon claude-icon">C</div>Claude API 调用统计</h3>
-                    <div class="stat-row"><span class="stat-label">24小时</span><span class="stat-value">${claudeStats.today}</span></div>
-                    <div class="stat-row"><span class="stat-label">7天</span><span class="stat-value">${claudeStats.week}</span></div>
-                    <div class="stat-row"><span class="stat-label">30天</span><span class="stat-value">${claudeStats.month}</span></div>
-                    <div class="stat-row"><span class="stat-label">总计</span><span class="stat-value">${claudeStats.total}</span></div>
-                </div>
-                <div class="stat-card">
-                    <h3><div class="api-icon xai-icon">X</div>XAI API 调用统计</h3>
-                    <div class="stat-row"><span class="stat-label">24小时</span><span class="stat-value">${xaiStats.today}</span></div>
-                    <div class="stat-row"><span class="stat-label">7天</span><span class="stat-value">${xaiStats.week}</span></div>
-                    <div class="stat-row"><span class="stat-label">30天</span><span class="stat-value">${xaiStats.month}</span></div>
-                    <div class="stat-row"><span class="stat-label">总计</span><span class="stat-value">${xaiStats.total}</span></div>
-                </div>
-                <div class="stat-card">
                     <h3><div class="api-icon total-icon">📊</div>总体统计</h3>
                     <div class="stat-row"><span class="stat-label">总请求数</span><span class="stat-value">${data.total || 0}</span></div>
                     <div class="stat-row"><span class="stat-label">活跃端点</span><span class="stat-value">${activeEndpoints}</span></div>
@@ -325,12 +289,31 @@ https://api.anthropic.com/v1/messages
         // 渲染端点列表
         function renderEndpointList() {
             let endpointListHTML = '';
-            for (const endpoint in apiMapping) {
-                endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
-                    <div class="endpoint-path">${endpoint}</div>
-                    <div class="endpoint-url">${currentDomain}${endpoint}</div>
-                </div>`;
+
+            // 获取有数据的端点并按调用次数排序，取前8个
+            if (rawStatsData && rawStatsData.endpoints) {
+                const activeEndpoints = Object.keys(rawStatsData.endpoints)
+                    .filter(ep => rawStatsData.endpoints[ep].total > 0)
+                    .sort((a, b) => rawStatsData.endpoints[b].total - rawStatsData.endpoints[a].total)
+                    .slice(0, 8);
+
+                activeEndpoints.forEach(endpoint => {
+                    endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
+                        <div class="endpoint-path">${endpoint}</div>
+                        <div class="endpoint-url">${currentDomain}${endpoint}</div>
+                    </div>`;
+                });
+            } else {
+                // 如果没有数据，显示所有端点（前8个）
+                const endpoints = Object.keys(apiMapping).slice(0, 8);
+                endpoints.forEach(endpoint => {
+                    endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
+                        <div class="endpoint-path">${endpoint}</div>
+                        <div class="endpoint-url">${currentDomain}${endpoint}</div>
+                    </div>`;
+                });
             }
+
             document.getElementById('endpoint-list').innerHTML = endpointListHTML;
 
             // 添加点击复制功能
@@ -369,10 +352,16 @@ https://api.anthropic.com/v1/messages
         }
 
         // 图表相关函数
-        function getChartDataForPeriod(period, allRequests, endpointDetails) {
+        function getChartDataForPeriod(period, allRequests, endpointDetails, selectedEndpoint = 'all') {
             const now = Date.now();
             let labels = [];
             let aggregatedData = [];
+
+            // 根据选择的端点过滤请求
+            let filteredRequests = allRequests;
+            if (selectedEndpoint !== 'all') {
+                filteredRequests = allRequests.filter(req => req.endpoint === selectedEndpoint);
+            }
 
             if (period === 'today') {
                 const hourlyCounts = Array(24).fill(0);
@@ -386,7 +375,7 @@ https://api.anthropic.com/v1/messages
                 }
 
                 const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
-                allRequests.filter(req => (req.timestamp * 1000) >= twentyFourHoursAgo)
+                filteredRequests.filter(req => (req.timestamp * 1000) >= twentyFourHoursAgo)
                     .forEach(req => {
                         const reqHour = new Date(req.timestamp * 1000);
                         const diffHours = Math.floor((reqHour.getTime() - firstHourTimestamp.getTime()) / (60 * 60 * 1000));
@@ -407,9 +396,9 @@ https://api.anthropic.com/v1/messages
                     day.setDate(firstDayTimestamp.getDate() + i);
                     labels.push(day.getFullYear() + '-' + (day.getMonth() + 1).toString().padStart(2, '0') + '-' + day.getDate().toString().padStart(2, '0'));
                 }
-                
+
                 const periodStartTimestamp = firstDayTimestamp.getTime();
-                allRequests.filter(req => (req.timestamp * 1000) >= periodStartTimestamp)
+                filteredRequests.filter(req => (req.timestamp * 1000) >= periodStartTimestamp)
                     .forEach(req => {
                         const reqDay = new Date(req.timestamp * 1000);
                         reqDay.setHours(0,0,0,0);
@@ -420,9 +409,16 @@ https://api.anthropic.com/v1/messages
                     });
                 aggregatedData = dailyCounts;
             } else if (period === 'total') {
-                const activeEndpoints = Object.keys(endpointDetails).filter(ep => endpointDetails[ep].total > 0);
-                labels = activeEndpoints.map(ep => ep.replace('/', ''));
-                aggregatedData = activeEndpoints.map(ep => endpointDetails[ep].total);
+                if (selectedEndpoint === 'all') {
+                    const activeEndpoints = Object.keys(endpointDetails).filter(ep => endpointDetails[ep].total > 0);
+                    labels = activeEndpoints.map(ep => ep.replace('/', ''));
+                    aggregatedData = activeEndpoints.map(ep => endpointDetails[ep].total);
+                } else {
+                    // 对于特定端点，显示不同时间段的数据
+                    labels = ['24小时', '7天', '30天', '总计'];
+                    const stats = endpointDetails[selectedEndpoint] || { today: 0, week: 0, month: 0, total: 0 };
+                    aggregatedData = [stats.today, stats.week, stats.month, stats.total];
+                }
             }
             return { labels, data: aggregatedData };
         }
@@ -430,8 +426,8 @@ https://api.anthropic.com/v1/messages
         function createCombinedChart(period) {
             const ctx = document.getElementById('apiChart').getContext('2d');
             if (chartInstance) chartInstance.destroy();
-            
-            const chartData = getChartDataForPeriod(period, rawStatsData.requests || [], rawStatsData.endpoints || {});
+
+            const chartData = getChartDataForPeriod(period, rawStatsData.requests || [], rawStatsData.endpoints || {}, currentEndpoint);
 
             if (chartData.labels.length === 0) {
                 ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -439,11 +435,13 @@ https://api.anthropic.com/v1/messages
                 ctx.font = '16px Arial';
                 ctx.textAlign = 'center';
                 ctx.fillText('暂无数据', ctx.canvas.width / 2, ctx.canvas.height / 2);
-                updateLegend(period, { labels: [], barData: [] });
+                updateChartInfo();
                 return;
             }
-            
-            const xAxisTitle = period === 'total' ? 'API 端点' : (period === 'today' ? '小时 (过去24小时)' : '日期');
+
+            const xAxisTitle = period === 'total'
+                ? (currentEndpoint === 'all' ? 'API 端点' : '时间段')
+                : (period === 'today' ? '小时 (过去24小时)' : '日期');
 
             const chartConfig = {
                 type: 'bar',
@@ -530,45 +528,45 @@ https://api.anthropic.com/v1/messages
                 }
             };
             chartInstance = new Chart(ctx, chartConfig);
-            updateLegend(period, chartData);
+            updateChartInfo();
         }
 
-        function updateLegend(period, chartData) {
-            const legendContainer = document.getElementById('chartLegend');
-            legendContainer.innerHTML = '';
-
-            if (chartData.labels.length === 0) {
-                legendContainer.innerHTML = '<div class="no-data">期间内无调用数据</div>';
-                return;
-            }
-
-            if (period === 'total') {
-                const totalOverall = chartData.data.reduce((sum, item) => sum + item, 0);
-                const legendItemsHtml = chartData.labels.map((label, index) => {
-                    const value = chartData.data[index];
-                    const percentage = totalOverall > 0 ? ((value / totalOverall) * 100).toFixed(1) : 0;
-                    return '<div class="legend-item">' +
-                        '<div class="legend-color" style="background-color: ' + barColors[index % barColors.length] + '"></div>' +
-                        '<span>' + label + ': ' + value + ' 次 (' + percentage + '%)</span>' +
-                        '</div>';
-                }).join('');
-                legendContainer.innerHTML = legendItemsHtml;
+        function updateChartInfo() {
+            const infoElement = document.getElementById('chartInfoText');
+            if (currentEndpoint === 'all') {
+                infoElement.textContent = '📊 组合图表：蓝色柱状图显示总API调用次数，红色折线图显示总体调用趋势。选择上方时间范围查看不同维度数据。';
             } else {
-                const periodText = period === 'today' ? '24小时' : (period === 'week' ? '7天' : '30天');
-                legendContainer.innerHTML = 
-                    '<div class="legend-item">' +
-                        '<div class="legend-color" style="background-color: #6366f1"></div>' +
-                        '<span>总调用次数 (柱状)</span>' +
-                    '</div>' +
-                    '<div class="legend-item">' +
-                        '<div class="legend-line" style="background-color: #ef4444"></div>' +
-                        '<span>调用趋势 (折线)</span>' +
-                    '</div>' +
-                    '<p style="font-size: 0.85rem; color: #666; margin-top: 10px;">' +
-                        '显示过去 ' + periodText + ' 的总调用数据。' +
-                    '</p>';
+                const endpointName = currentEndpoint.replace('/', '');
+                infoElement.textContent = `📊 组合图表：显示 ${endpointName} 端点的调用统计。蓝色柱状图显示调用次数，红色折线图显示调用趋势。`;
             }
         }
+
+        // 填充端点选择器
+        function populateEndpointSelector() {
+            const selector = document.getElementById('endpointSelect');
+            selector.innerHTML = '<option value="all">全部端点</option>';
+
+            if (rawStatsData && rawStatsData.endpoints) {
+                const activeEndpoints = Object.keys(rawStatsData.endpoints)
+                    .filter(ep => rawStatsData.endpoints[ep].total > 0)
+                    .sort();
+
+                activeEndpoints.forEach(endpoint => {
+                    const option = document.createElement('option');
+                    option.value = endpoint;
+                    option.textContent = endpoint.replace('/', '') + ' (' + rawStatsData.endpoints[endpoint].total + '次)';
+                    selector.appendChild(option);
+                });
+            }
+        }
+
+        // 切换端点
+        function switchEndpoint(newEndpoint) {
+            currentEndpoint = newEndpoint;
+            document.getElementById('endpointSelect').value = newEndpoint;
+            createCombinedChart(currentPeriod);
+        }
+
 
         function switchPeriod(newPeriod) {
             currentPeriod = newPeriod;
@@ -619,6 +617,8 @@ https://api.anthropic.com/v1/messages
             if (data) {
                 renderStatsCards(data);
                 updatePerformanceInfo(data.performance);
+                populateEndpointSelector();
+                renderEndpointList();
                 createCombinedChart(currentPeriod);
                 showToast('数据已刷新');
             }
@@ -628,12 +628,13 @@ https://api.anthropic.com/v1/messages
         document.addEventListener('DOMContentLoaded', async function() {
             currentDomain = getCurrentDomain();
             updateDomainReferences();
-            renderEndpointList();
-            
+
             const data = await loadStatsData();
             if (data) {
                 renderStatsCards(data);
                 updatePerformanceInfo(data.performance);
+                populateEndpointSelector();
+                renderEndpointList();
                 createCombinedChart(currentPeriod);
             }
 
@@ -642,6 +643,11 @@ https://api.anthropic.com/v1/messages
                 tab.addEventListener('click', function() {
                     switchPeriod(this.dataset.period);
                 });
+            });
+
+            // 端点选择器事件
+            document.getElementById('endpointSelect').addEventListener('change', function() {
+                switchEndpoint(this.value);
             });
         });
 

@@ -10,18 +10,16 @@ app_port: 8000
 
 # API代理服务器 (Go 异步优化版)
 
-⚡ 支持多种AI API代理、网页代理与实时统计面板，采用异步架构实现毫秒级响应。
+⚡ 透明API代理服务器，支持多种AI API代理与实时统计面板，采用异步架构实现毫秒级响应。
 
 ## 🚀 主要特性
+- **透明代理**：完全透明转发所有请求/响应头（符合RFC 7230）
 - 支持 OpenAI、Gemini、Claude、XAI 等主流AI API代理
 - **🔧 动态配置管理**：API映射存储在Redis,支持热更新无需重启
 - **📊 Web管理界面**：可视化增删改API映射,实时生效(/admin)
 - **🔐 安全认证**：管理接口Token认证保护
-- 支持网页代理（/proxy/https://...）
 - 实时统计API调用次数，支持24h/7d/30d/总计多维度
 - 统计面板美观直观，支持一键复制代理地址
-- 支持CORS跨域、自动转发常用请求头
-- Gemini NoThink模式：自动为Gemini请求添加thinkingBudget: 0
 - 安全特性：安全响应头、禁止爬虫、自动处理预检请求
 - **异步架构**：真正异步响应转发，毫秒级响应体验
 - **流式传输**：支持实时流式数据传输，边收边发
@@ -147,23 +145,24 @@ func apc_streamResponseBody(asyncCtx *AsyncProxyContext, resp *http.Response) er
 
 ### 流式响应测试
 ```bash
-# 测试流式数据立即返回
-curl "http://localhost:8000/proxy/https://httpbin.org/stream/5" --no-buffer
+# 测试AI API流式响应
+curl -X POST "http://localhost:8000/openai/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -d '{"model":"gpt-4","messages":[{"role":"user","content":"Hello"}],"stream":true}' \
+  --no-buffer
 
-# 结果：数据逐行实时返回，无等待
-{"id": 0} ← 立即显示
-{"id": 1} ← 立即显示
-{"id": 2} ← 立即显示
+# 结果：数据逐token实时返回，无等待
 ```
 
 ### 并发性能测试
 ```bash
-# 10个并发1秒延迟请求
-time for i in {1..10}; do 
-  curl "http://localhost:8000/proxy/https://httpbin.org/delay/1" -o /dev/null -s & 
+# 20个并发请求测试
+time for i in {1..20}; do
+  curl "http://localhost:8000/stats" -o /dev/null -s &
 done; wait
 
-# 结果：所有请求并发处理，总时间 ≈ 1秒（而非10秒）
+# 结果：所有请求并发处理，总时间 < 1秒
 ```
 
 ### 内存使用优化
@@ -226,11 +225,11 @@ func updatePerformanceMetrics() {
 
 ### 大文件处理策略
 ```bash
-# 1GB文件下载测试
-curl "http://localhost:8000/proxy/https://example.com/1gb-file.zip" -o test.zip
+# 大文件API响应测试
+curl "http://localhost:8000/openai/v1/files/download" -o file.zip
 
 # 内存使用：始终保持在15-30MB范围内
-# 原理：32KB缓冲区边读边写，不缓存完整文件
+# 原理：动态缓冲区边读边写，不缓存完整文件
 ```
 
 ## 🔧 异步处理机制
@@ -250,41 +249,13 @@ go func() {
 ```
 
 ### 2. 超时控制
-- **API 请求：60秒超时**
-- **网页代理：120秒超时**
+- **透明代理：不设置超时，完全由客户端和服务端控制**
 - **支持上下文取消**
 
 ### 3. 错误处理
 - **网络错误立即返回**
 - **超时自动取消**
 - **连接断开检测**
-
-## 🌐 HTML 流式重写
-
-### 异步HTML处理器
-```go
-type AsyncHTMLRewriter struct {
-    asyncCtx  *AsyncProxyContext
-    targetURL *url.URL
-    proxyBase string
-    buffer    []byte
-}
-
-// 8KB块处理，边读边重写边发送
-func (h *AsyncHTMLRewriter) Write(data []byte) error {
-    h.buffer = append(h.buffer, data...)
-    processed := h.processBuffer()
-    if len(processed) > 0 {
-        return h.asyncCtx.StreamData(processed)  // 立即发送
-    }
-    return nil
-}
-```
-
-### URL重写规则
-- `href="https://example.com"` → `href="/proxy/https://example.com"`
-- `src="https://example.com"` → `src="/proxy/https://example.com"`
-- **保持1KB缓冲防止URL跨块边界**
 
 ## 🚀 性能优化亮点
 
@@ -314,21 +285,14 @@ curl -X POST "http://localhost:8000/claude/v1/chat/completions" \
 # 结果：每个token立即返回，无缓冲延迟
 ```
 
-### 2. 大文件下载代理
+### 2. 大文件API响应
 ```bash
-# 100MB文件下载
-curl "http://localhost:8000/proxy/https://example.com/largefile.zip" \
-  -o largefile.zip
+# 大文件下载
+curl "http://localhost:8000/openai/v1/files/file-xxx" \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -o file.bin
 
-# 结果：边下载边保存，内存使用恒定32KB
-```
-
-### 3. 网页实时浏览
-```bash
-# 动态网页代理
-curl "http://localhost:8000/proxy/https://example.com"
-
-# 结果：HTML边加载边显示，URL自动重写
+# 结果：边下载边保存，内存使用恒定
 ```
 
 ## 📈 性能提升对比
@@ -549,8 +513,8 @@ docker run -d -p 8000:8000 \
 ## 主要路由说明
 - `/` 或 `/index.html`：统计面板与使用说明
 - `/stats`：返回JSON格式的统计数据
-- `/proxy/https://example.com`：网页/接口代理
-- `/openai/...` `/gemini/...` `/claude/...` `/xai/...` 等：API代理
+- `/admin`：API映射管理界面
+- `/openai/...` `/gemini/...` `/claude/...` `/xai/...` 等：透明API代理
 
 ## 代理API使用示例
 
@@ -563,40 +527,45 @@ Headers: Authorization: Bearer YOUR_API_KEY
 **Gemini 代理**
 ```
 POST http://localhost:8000/gemini/v1/models
+Headers: x-goog-api-key: YOUR_API_KEY
 ```
 
-**网页代理**
-```
-http://localhost:8000/proxy/https://platform.openai.com/docs
-```
-
-## 🔧 测试异步功能
+## 🔧 测试透明代理功能
 
 ```bash
 # 流式响应测试
-curl "http://localhost:8000/proxy/https://httpbin.org/stream/10" --no-buffer
+curl -X POST "http://localhost:8000/openai/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -d '{"model":"gpt-4","messages":[{"role":"user","content":"test"}],"stream":true}' \
+  --no-buffer
 
-# 并发性能测试  
+# 并发性能测试
 for i in {1..20}; do curl "http://localhost:8000/stats" -o /dev/null -s & done; wait
 
-# HTML代理测试
-curl "http://localhost:8000/proxy/https://example.com"
+# 请求头透明转发验证
+curl -v "http://localhost:8000/openai/v1/models" \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "User-Agent: MyApp/1.0" \
+  -H "X-Custom-Header: test"
 ```
 
 ## 🌟 总结
 
 这个异步代理实现将传统的**同步阻塞架构**升级为**真正异步实时架构**：
 
-✅ **立即响应转发** - 一收到就发送  
-✅ **真正流式传输** - 边收边发  
-✅ **内存使用恒定** - 32KB缓冲区  
-✅ **支持无限并发** - goroutine池化  
-✅ **智能错误处理** - 超时和取消机制  
-✅ **HTML实时重写** - 保持代理功能  
-✅ **多线程支持** - 完全支持多线程并发处理  
-✅ **并发安全** - 原子操作和读写锁保护  
+✅ **完全透明代理** - 符合RFC 7230标准
+✅ **立即响应转发** - 一收到就发送
+✅ **真正流式传输** - 边收边发
+✅ **内存使用恒定** - 动态缓冲区
+✅ **支持无限并发** - goroutine池化
+✅ **智能错误处理** - 超时和取消机制
+✅ **多线程支持** - 完全支持多线程并发处理
+✅ **并发安全** - 原子操作和读写锁保护
+✅ **请求头完整转发** - 保留所有客户端请求头（除hop-by-hop）
+✅ **响应头完整转发** - 保留所有服务端响应头（除hop-by-hop）
 
-这使得代理服务器能够**真正实时**地转发服务端响应，为用户提供**毫秒级**的响应体验，同时充分利用多核CPU的并发处理能力！
+这使得代理服务器能够**完全透明**地转发API请求，为用户提供**毫秒级**的响应体验，同时充分利用多核CPU的并发处理能力！
 
 ---
 

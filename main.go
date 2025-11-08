@@ -105,9 +105,6 @@ func main() {
 		r.Any(prefix+"/*path", proxyHandler.HandleAPIProxy)
 	}
 
-	// 网页代理路由
-	r.Any("/proxy/*path", proxyHandler.HandleProxy)
-
 	// 启动服务器
 	port := os.Getenv("PORT")
 	if port == "" {

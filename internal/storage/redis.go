@@ -41,6 +41,7 @@ type MappingManager struct {
 // 支持格式:
 //   - redis://[username]:password@host:port/db  (标准Redis)
 //   - rediss://[username]:password@host:port/db (Redis over TLS)
+//
 // 示例:
 //   - redis://:mypassword@localhost:6379/0
 //   - rediss://:mypassword@secure-redis.example.com:6380/0
@@ -50,9 +51,9 @@ func parseRedisURL(redisURL string) (*redis.Options, error) {
 		Addr:         "localhost:6379",
 		Password:     "",
 		DB:           0,
-		DialTimeout:  30 * time.Second,  // 增加到30秒，适应云服务
-		ReadTimeout:  10 * time.Second,  // 增加到10秒
-		WriteTimeout: 10 * time.Second,  // 增加到10秒
+		DialTimeout:  30 * time.Second, // 增加到30秒，适应云服务
+		ReadTimeout:  10 * time.Second, // 增加到10秒
+		WriteTimeout: 10 * time.Second, // 增加到10秒
 		PoolSize:     10,
 		MinIdleConns: 2,
 	}
