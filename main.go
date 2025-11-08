@@ -22,12 +22,15 @@ import (
 
 func main() {
 	// 加载 .env 文件
-	if err := godotenv.Load("deployments/config/.env.example"); err != nil {
-		if err := godotenv.Load(); err != nil {
+	// 优先加载根目录的.env，如果不存在则尝试deployments/config/.env.example
+	if err := godotenv.Load(); err != nil {
+		if err := godotenv.Load("deployments/config/.env.example"); err != nil {
 			log.Println("⚠️  未找到 .env 文件,将使用系统环境变量")
+		} else {
+			log.Println("✅ 已加载 deployments/config/.env.example 示例配置")
 		}
 	} else {
-		log.Println("✅ 已加载 .env 文件")
+		log.Println("✅ 已加载根目录 .env 文件")
 	}
 
 	// 设置生产模式
