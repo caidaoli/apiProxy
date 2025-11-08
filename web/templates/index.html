@@ -7,12 +7,31 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <link rel="stylesheet" href="/static/css/styles.css">
 </head>
-<body>
+<body class="with-navbar">
+    <!-- 顶部导航栏 -->
+    <nav class="navbar">
+        <div class="navbar-container">
+            <a href="/" class="navbar-brand">
+                <div class="navbar-logo">P</div>
+                <span class="navbar-title">API Proxy</span>
+            </a>
+            <div class="navbar-nav">
+                <a href="/" class="nav-item active">
+                    <span>📊</span>
+                    <span>统计概览</span>
+                </a>
+                <a href="/admin" class="nav-item">
+                    <span>🔧</span>
+                    <span>映射管理</span>
+                </a>
+            </div>
+        </div>
+    </nav>
+
     <div class="container">
         <div class="header">
             <h1>🚀 API代理服务器<span class="go-badge">Go版本</span><span class="performance-badge">性能优化</span></h1>
             <p id="performance-info">正在加载性能数据...</p>
-            <a href="/admin" class="admin-link">🔧 管理API映射</a>
         </div>
         
         <div class="chart-section">

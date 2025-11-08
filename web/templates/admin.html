@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API映射管理 - 管理面板</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -70,6 +71,26 @@
 
     <!-- 管理面板 -->
     <div id="adminPanel" class="hidden">
+        <!-- 顶部导航栏 -->
+        <nav class="navbar">
+            <div class="navbar-container">
+                <a href="/" class="navbar-brand">
+                    <div class="navbar-logo">P</div>
+                    <span class="navbar-title">API Proxy</span>
+                </a>
+                <div class="navbar-nav">
+                    <a href="/" class="nav-item">
+                        <span>📊</span>
+                        <span>统计概览</span>
+                    </a>
+                    <a href="/admin" class="nav-item active">
+                        <span>🔧</span>
+                        <span>映射管理</span>
+                    </a>
+                </div>
+            </div>
+        </nav>
+
         <div class="max-w-7xl mx-auto p-5">
             <!-- 头部 -->
             <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
@@ -87,10 +108,6 @@
                         <button onclick="loadMappings()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors flex items-center gap-2">
                             <span>🔄</span>
                             <span>刷新</span>
-                        </button>
-                        <button onclick="window.location.href='/'" class="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2">
-                            <span>📊</span>
-                            <span>统计面板</span>
                         </button>
                         <button onclick="logout()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors">
                             退出
