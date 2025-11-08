@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API代理服务器 - 统计面板</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 API代理服务器<span class="go-badge">Go版本</span><span class="performance-badge">性能优化</span></h1>
+            <p id="performance-info">正在加载性能数据...</p>
+        </div>
+        
+        <div class="chart-section">
+            <div class="chart-header">
+                <h2 class="chart-title">📊 API调用统计图表</h2>
+                <div class="time-tabs">
+                    <button class="time-tab active" data-period="today">24小时</button>
+                    <button class="time-tab" data-period="week">7天</button>
+                    <button class="time-tab" data-period="month">30天</button>
+                    <button class="time-tab" data-period="total">总计</button>
+                </div>
+            </div>
+            <div class="chart-info">
+                <p>📊 组合图表：蓝色柱状图显示总API调用次数，红色折线图显示总体调用趋势。选择上方时间范围查看不同维度数据。</p>
+            </div>
+            <div class="chart-grid">
+                <div class="chart-container">
+                    <canvas id="apiChart"></canvas>
+                </div>
+                <div>
+                    <div class="chart-legend" id="chartLegend"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="stats-grid" id="stats-grid">
+            <!-- 统计卡片将通过JavaScript动态加载 -->
+        </div>
+        
+        <div class="usage-guide">
+            <h2>📖 使用说明</h2>
+            <h3>支持的API端点</h3>
+            <div class="endpoint-list" id="endpoint-list">
+                <!-- 端点列表将通过JavaScript动态加载 -->
+            </div>
+            
+            <div class="example-section">
+                <h3>🔧 使用方法</h3>
+                <p style="margin-bottom: 16px; color: #666;">将原始API地址替换为代理地址，例如：</p>
+                
+                <h4 style="margin: 16px 0 8px 0; color: #333;">OpenAI API 示例：</h4>
+                <div class="code-block"># 原始地址
+https://api.openai.com/v1/chat/completions
+
+# 代理地址
+<span id="current-domain">loading...</span>/openai/v1/chat/completions</div>
+                
+                <h4 style="margin: 16px 0 8px 0; color: #333;">JavaScript 示例：</h4>
+                <div class="code-block">// 使用 fetch API
+const response = await fetch('<span id="js-example-domain">loading...</span>/openai/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_API_KEY'
+  },
+  body: JSON.stringify({
+    model: 'gpt-3.5-turbo',
+    messages: [{ role: 'user', content: 'Hello!' }]
+  })
+});
+
+const data = await response.json();
+console.log(data);</div>
+                
+                <h4 style="margin: 16px 0 8px 0; color: #333;">Gemini API 示例：</h4>
+                <div class="code-block"># 原始地址
+https://generativelanguage.googleapis.com/v1/models
+
+# 代理地址
+<span id="gemini-example-domain">loading...</span>/gemini/v1/models</div>
+                
+                <h4 style="margin: 16px 0 8px 0; color: #333;">Claude API 示例：</h4>
+                <div class="code-block"># 原始地址
+https://api.anthropic.com/v1/messages
+
+# 代理地址
+<span id="claude-example-domain">loading...</span>/claude/v1/messages</div>
+            </div>
+            
+            <div class="example-section">
+                <h3>⚡ Go版本特性</h3>
+                <ul style="margin-left: 20px; color: #666; line-height: 1.6;">
+                    <li>🚀 <strong>高并发性能</strong>：支持数万并发连接</li>
+                    <li>⚡ <strong>低延迟</strong>：平均响应时间 < 50ms</li>
+                    <li>💾 <strong>内存优化</strong>：使用原子操作和读写锁</li>
+                    <li>🔄 <strong>连接池</strong>：HTTP连接复用和Keep-Alive</li>
+                    <li>📊 <strong>智能缓存</strong>：统计数据3秒缓存机制</li>
+                    <li>🛡️ <strong>异步处理</strong>：统计记录异步化避免阻塞</li>
+                    <li>🧹 <strong>自动清理</strong>：定期清理过期数据释放内存</li>
+                    <li>✅ 支持所有HTTP方法和CORS跨域请求</li>
+                    <li>✅ 实时性能监控和错误率统计</li>
+                    <li>✅ 代理模式支持完整网页浏览</li>
+                    <li>✅ Gemini NoThink模式自动禁用思考模式</li>
+                </ul>
+            </div>
+            
+            <div class="example-section">
+                <h3>⚡ 特性</h3>
+                <ul style="margin-left: 20px; color: #666; line-height: 1.6;">
+                    <li>✅ 支持所有HTTP方法 (GET, POST, PUT, DELETE等)</li>
+                    <li>✅ 自动转发请求头和响应头</li>
+                    <li>✅ 支持CORS跨域请求</li>
+                    <li>✅ 实时统计API调用次数</li>
+                    <li>✅ 代理模式支持完整网页浏览</li>
+                    <li>✅ 自动获取当前域名，无需手动配置</li>
+                    <li>✅ 组合图表展示调用统计和趋势</li>
+                    <li>✅ Gemini NoThink模式：自动为Gemini请求添加thinkingBudget: 0禁用思考模式</li>
+                </ul>
+            </div>
+            
+            <div class="example-section">
+                <h3>📊 统计功能</h3>
+                <ul style="margin-left: 20px; color: #666; line-height: 1.6;">
+                    <li>📈 实时统计API调用次数</li>
+                    <li>📈 支持多时间维度统计（24h/7d/30d/总计）</li>
+                    <li>📈 重点监控OpenAI、Gemini、Claude和XAI API使用量</li>
+                    <li>📈 提供JSON格式统计API: <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;" id="stats-api-url">loading...</code></li>
+                    <li>📈 组合图表展示，柱状图+折线图显示数据和趋势</li>
+                </ul>
+            </div>
+            
+            <div class="example-section">
+                <h3>📊 统计API</h3>
+                <p style="margin-bottom: 16px; color: #666;">提供JSON格式的统计数据：</p>
+                <div class="code-block">GET <span id="stats-example-domain">loading...</span>/stats</div>
+            </div>
+        </div>
+    </div>
+    <button class="refresh-btn" onclick="refreshData()">🔄 刷新数据</button>
+    
+    <div id="toast" class="toast"></div>
+    
+    <script>
+        let rawStatsData = null;
+        let chartInstance = null;
+        let currentPeriod = 'today';
+        let currentDomain = '';
+        const barColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#64748b', '#14b8a6', '#a855f7', '#eab308', '#22c55e', '#3b82f6'];
+
+        // API映射
+        const apiMapping = {
+            "/discord": "https://discord.com/api",
+            "/telegram": "https://api.telegram.org",
+            "/openai": "https://api.openai.com",
+            "/claude": "https://api.anthropic.com",
+            "/gemini": "https://generativelanguage.googleapis.com",
+            "/gnothink": "https://generativelanguage.googleapis.com",
+            "/meta": "https://www.meta.ai/api",
+            "/groq": "https://api.groq.com/openai",
+            "/xai": "https://api.x.ai",
+            "/cohere": "https://api.cohere.ai",
+            "/huggingface": "https://api-inference.huggingface.co",
+            "/together": "https://api.together.xyz",
+            "/novita": "https://api.novita.ai",
+            "/portkey": "https://api.portkey.ai",
+            "/fireworks": "https://api.fireworks.ai",
+            "/openrouter": "https://openrouter.ai/api",
+            "/sophnet": "https://sophnet.com/",
+            "/cerebras": "https://api.cerebras.ai"
+        };
+
+        // 获取当前域名
+        function getCurrentDomain() {
+            const protocol = window.location.protocol;
+            const host = window.location.host;
+            return `${protocol}//${host}`;
+        }
+
+        // 加载统计数据
+        async function loadStatsData() {
+            try {
+                const response = await fetch('/stats');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                rawStatsData = {
+                    stats: {
+                        total: data.total,
+                        endpoints: data.endpoints
+                    },
+                    performance: data.performance,
+                    requests: data.requests || [], // 从后端获取的请求时间戳数据
+                    endpoints: data.endpoints
+                };
+                
+                return data;
+            } catch (error) {
+                console.error('加载统计数据失败:', error);
+                showToast('加载数据失败，请稍后重试');
+                return null;
+            }
+        }
+
+        // 渲染统计卡片
+        function renderStatsCards(data) {
+            const getStats = (endpoint) => {
+                if (data.endpoints && data.endpoints[endpoint]) {
+                    return data.endpoints[endpoint];
+                }
+                return { total: 0, today: 0, week: 0, month: 0 };
+            };
+
+            const cerebrasStats = getStats('/cerebras');
+            const geminiStats = getStats('/gemini');
+            const claudeStats = getStats('/claude');
+            const xaiStats = getStats('/xai');
+
+            const activeEndpoints = Object.keys(data.endpoints || {}).filter(k => 
+                data.endpoints[k].total > 0
+            ).length;
+
+            // 性能等级CSS类
+            const getPerformanceClass = (value, good, warning) => {
+                if (value <= good) return 'good';
+                if (value <= warning) return 'warning';
+                return 'danger';
+            };
+
+            const getMemoryClass = (value) => {
+                if (value <= 50) return 'good';
+                if (value <= 100) return 'warning';
+                return 'danger';
+            };
+
+            const getResponseTimeClass = (value) => {
+                if (value <= 100) return 'good';
+                if (value <= 500) return 'warning';
+                return 'danger';
+            };
+
+            const getErrorRateClass = (value) => {
+                if (value <= 1.0) return 'good';
+                if (value <= 5.0) return 'warning';
+                return 'danger';
+            };
+
+            const performance = data.performance || {};
+            const qpsClass = getPerformanceClass(performance.requests_per_sec || 0, 10, 50);
+            const responseTimeClass = getResponseTimeClass(performance.avg_response_time_ms || 0);
+            const errorRateClass = getErrorRateClass(performance.error_rate || 0);
+            const memoryClass = getMemoryClass(performance.memory_usage_mb || 0);
+
+            document.getElementById('stats-grid').innerHTML = `
+                <div class="stat-card">
+                    <h3><div class="api-icon openai-icon">C</div>Cerebras API 调用统计</h3>
+                    <div class="stat-row"><span class="stat-label">24小时</span><span class="stat-value">${cerebrasStats.today}</span></div>
+                    <div class="stat-row"><span class="stat-label">7天</span><span class="stat-value">${cerebrasStats.week}</span></div>
+                    <div class="stat-row"><span class="stat-label">30天</span><span class="stat-value">${cerebrasStats.month}</span></div>
+                    <div class="stat-row"><span class="stat-label">总计</span><span class="stat-value">${cerebrasStats.total}</span></div>
+                </div>
+                <div class="stat-card">
+                    <h3><div class="api-icon gemini-icon">G</div>Gemini API 调用统计</h3>
+                    <div class="stat-row"><span class="stat-label">24小时</span><span class="stat-value">${geminiStats.today}</span></div>
+                    <div class="stat-row"><span class="stat-label">7天</span><span class="stat-value">${geminiStats.week}</span></div>
+                    <div class="stat-row"><span class="stat-label">30天</span><span class="stat-value">${geminiStats.month}</span></div>
+                    <div class="stat-row"><span class="stat-label">总计</span><span class="stat-value">${geminiStats.total}</span></div>
+                </div>
+                <div class="stat-card">
+                    <h3><div class="api-icon claude-icon">C</div>Claude API 调用统计</h3>
+                    <div class="stat-row"><span class="stat-label">24小时</span><span class="stat-value">${claudeStats.today}</span></div>
+                    <div class="stat-row"><span class="stat-label">7天</span><span class="stat-value">${claudeStats.week}</span></div>
+                    <div class="stat-row"><span class="stat-label">30天</span><span class="stat-value">${claudeStats.month}</span></div>
+                    <div class="stat-row"><span class="stat-label">总计</span><span class="stat-value">${claudeStats.total}</span></div>
+                </div>
+                <div class="stat-card">
+                    <h3><div class="api-icon xai-icon">X</div>XAI API 调用统计</h3>
+                    <div class="stat-row"><span class="stat-label">24小时</span><span class="stat-value">${xaiStats.today}</span></div>
+                    <div class="stat-row"><span class="stat-label">7天</span><span class="stat-value">${xaiStats.week}</span></div>
+                    <div class="stat-row"><span class="stat-label">30天</span><span class="stat-value">${xaiStats.month}</span></div>
+                    <div class="stat-row"><span class="stat-label">总计</span><span class="stat-value">${xaiStats.total}</span></div>
+                </div>
+                <div class="stat-card">
+                    <h3><div class="api-icon total-icon">📊</div>总体统计</h3>
+                    <div class="stat-row"><span class="stat-label">总请求数</span><span class="stat-value">${data.total || 0}</span></div>
+                    <div class="stat-row"><span class="stat-label">活跃端点</span><span class="stat-value">${activeEndpoints}</span></div>
+                    <div class="stat-row"><span class="stat-label">服务状态</span><span class="stat-value good">🟢 运行中 (Go优化版)</span></div>
+                </div>
+                <div class="stat-card">
+                    <h3><div class="api-icon perf-icon">⚡</div>实时性能指标</h3>
+                    <div class="stat-row"><span class="stat-label">每秒请求数</span><span class="stat-value ${qpsClass}">${(performance.requests_per_sec || 0).toFixed(2)} QPS</span></div>
+                    <div class="stat-row"><span class="stat-label">平均响应时间</span><span class="stat-value ${responseTimeClass}">${performance.avg_response_time_ms || 0} ms</span></div>
+                    <div class="stat-row"><span class="stat-label">错误率</span><span class="stat-value ${errorRateClass}">${(performance.error_rate || 0).toFixed(2)}%</span></div>
+                    <div class="stat-row"><span class="stat-label">内存使用</span><span class="stat-value ${memoryClass}">${(performance.memory_usage_mb || 0).toFixed(2)} MB</span></div>
+                    <div class="stat-row"><span class="stat-label">协程数量</span><span class="stat-value">${performance.goroutine_count || 0}</span></div>
+                </div>
+            `;
+        }
+
+        // 渲染端点列表
+        function renderEndpointList() {
+            let endpointListHTML = '';
+            for (const endpoint in apiMapping) {
+                endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
+                    <div class="endpoint-path">${endpoint}</div>
+                    <div class="endpoint-url">${currentDomain}${endpoint}</div>
+                </div>`;
+            }
+            document.getElementById('endpoint-list').innerHTML = endpointListHTML;
+
+            // 添加点击复制功能
+            document.querySelectorAll('.endpoint-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    const url = this.querySelector('.endpoint-url').textContent.trim();
+                    copyToClipboard(url);
+                    const originalBg = this.style.backgroundColor;
+                    const originalBorder = this.style.borderLeftColor;
+                    this.style.backgroundColor = '#dcfce7';
+                    this.style.borderLeftColor = '#16a34a';
+                    setTimeout(() => {
+                        this.style.backgroundColor = originalBg;
+                        this.style.borderLeftColor = originalBorder;
+                    }, 1000);
+                });
+            });
+        }
+
+        // 更新性能信息
+        function updatePerformanceInfo(performance) {
+            const qps = (performance.requests_per_sec || 0).toFixed(2);
+            const memory = (performance.memory_usage_mb || 0).toFixed(2);
+            const info = `高性能实时统计与使用指南 - QPS: ${qps} | 平均响应: ${performance.avg_response_time_ms || 0}ms | 内存: ${memory}MB`;
+            document.getElementById('performance-info').textContent = info;
+        }
+
+        // 更新域名相关的显示
+        function updateDomainReferences() {
+            document.getElementById('current-domain').textContent = currentDomain;
+            document.getElementById('js-example-domain').textContent = currentDomain;
+            document.getElementById('gemini-example-domain').textContent = currentDomain;
+            document.getElementById('claude-example-domain').textContent = currentDomain;
+            document.getElementById('stats-api-url').textContent = `${currentDomain}/stats`;
+            document.getElementById('stats-example-domain').textContent = currentDomain;
+        }
+
+        // 图表相关函数
+        function getChartDataForPeriod(period, allRequests, endpointDetails) {
+            const now = Date.now();
+            let labels = [];
+            let aggregatedData = [];
+
+            if (period === 'today') {
+                const hourlyCounts = Array(24).fill(0);
+                const firstHourTimestamp = new Date(now - 23 * 60 * 60 * 1000);
+                firstHourTimestamp.setMinutes(0, 0, 0);
+
+                for (let i = 0; i < 24; i++) {
+                    const hour = new Date(firstHourTimestamp);
+                    hour.setHours(firstHourTimestamp.getHours() + i);
+                    labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
+                }
+
+                const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
+                allRequests.filter(req => (req.timestamp * 1000) >= twentyFourHoursAgo)
+                    .forEach(req => {
+                        const reqHour = new Date(req.timestamp * 1000);
+                        const diffHours = Math.floor((reqHour.getTime() - firstHourTimestamp.getTime()) / (60 * 60 * 1000));
+                        if (diffHours >= 0 && diffHours < 24) {
+                            hourlyCounts[diffHours]++;
+                        }
+                    });
+                aggregatedData = hourlyCounts;
+            } else if (period === 'week' || period === 'month') {
+                const numDays = period === 'week' ? 7 : 30;
+                const dailyCounts = Array(numDays).fill(0);
+                const firstDayTimestamp = new Date(now);
+                firstDayTimestamp.setDate(firstDayTimestamp.getDate() - (numDays - 1));
+                firstDayTimestamp.setHours(0, 0, 0, 0);
+
+                for (let i = 0; i < numDays; i++) {
+                    const day = new Date(firstDayTimestamp);
+                    day.setDate(firstDayTimestamp.getDate() + i);
+                    labels.push(day.getFullYear() + '-' + (day.getMonth() + 1).toString().padStart(2, '0') + '-' + day.getDate().toString().padStart(2, '0'));
+                }
+                
+                const periodStartTimestamp = firstDayTimestamp.getTime();
+                allRequests.filter(req => (req.timestamp * 1000) >= periodStartTimestamp)
+                    .forEach(req => {
+                        const reqDay = new Date(req.timestamp * 1000);
+                        reqDay.setHours(0,0,0,0);
+                        const diffDays = Math.floor((reqDay.getTime() - firstDayTimestamp.getTime()) / (24 * 60 * 60 * 1000));
+                        if (diffDays >= 0 && diffDays < numDays) {
+                           dailyCounts[diffDays]++;
+                        }
+                    });
+                aggregatedData = dailyCounts;
+            } else if (period === 'total') {
+                const activeEndpoints = Object.keys(endpointDetails).filter(ep => endpointDetails[ep].total > 0);
+                labels = activeEndpoints.map(ep => ep.replace('/', ''));
+                aggregatedData = activeEndpoints.map(ep => endpointDetails[ep].total);
+            }
+            return { labels, data: aggregatedData };
+        }
+
+        function createCombinedChart(period) {
+            const ctx = document.getElementById('apiChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+            
+            const chartData = getChartDataForPeriod(period, rawStatsData.requests || [], rawStatsData.endpoints || {});
+
+            if (chartData.labels.length === 0) {
+                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+                ctx.fillStyle = '#64748b';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('暂无数据', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                updateLegend(period, { labels: [], barData: [] });
+                return;
+            }
+            
+            const xAxisTitle = period === 'total' ? 'API 端点' : (period === 'today' ? '小时 (过去24小时)' : '日期');
+
+            const chartConfig = {
+                type: 'bar',
+                data: {
+                    labels: chartData.labels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'API调用次数',
+                            data: chartData.data,
+                            backgroundColor: period === 'total' 
+                                ? chartData.labels.map((_, i) => barColors[i % barColors.length] + 'B3')
+                                : '#6366f1B3',
+                            borderColor: period === 'total' 
+                                ? chartData.labels.map((_, i) => barColors[i % barColors.length])
+                                : '#6366f1',
+                            borderWidth: 1.5,
+                            yAxisID: 'y',
+                            order: 2
+                        },
+                        {
+                            type: 'line',
+                            label: '调用趋势',
+                            data: chartData.data,
+                            borderColor: '#ef4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            borderWidth: 2.5,
+                            pointBackgroundColor: '#ef4444',
+                            pointBorderColor: 'white',
+                            pointBorderWidth: 1.5,
+                            pointRadius: period === 'total' ? 4 : (period === 'today' ? 3 : 4),
+                            pointHoverRadius: period === 'total' ? 6 : (period === 'today' ? 5 : 6),
+                            fill: false,
+                            tension: (period === 'today' || period === 'total') ? 0.1 : 0.3,
+                            yAxisID: 'y',
+                            order: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, position: 'top', labels: { usePointStyle: true, padding: 20, font: { size: 12 } } },
+                        tooltip: {
+                            backgroundColor: 'rgba(0,0,0,0.85)',
+                            titleColor: 'white',
+                            bodyColor: 'white',
+                            borderColor: '#6366f1',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) label += ': ';
+                                    if (context.parsed.y !== null) label += context.parsed.y + ' 次';
+                                    
+                                    if (period === 'total') {
+                                        const total = chartData.data.reduce((a, b) => a + b, 0);
+                                        if (total > 0) {
+                                            const percentage = ((context.raw / total) * 100).toFixed(1);
+                                            label += ' (' + percentage + '%)';
+                                        }
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: xAxisTitle, color: '#333', font: { weight: 'bold' } },
+                            ticks: { color: '#64748b', maxRotation: period === 'month' ? 45 : 0, minRotation: 0 },
+                            grid: { color: '#e2e8f0' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: '#64748b', precision: 0 },
+                            grid: { color: '#e2e8f0' },
+                            title: { display: true, text: '调用次数', color: '#333', font: { weight: 'bold' } }
+                        }
+                    },
+                    animation: { duration: 800, easing: 'easeOutQuart' }
+                }
+            };
+            chartInstance = new Chart(ctx, chartConfig);
+            updateLegend(period, chartData);
+        }
+
+        function updateLegend(period, chartData) {
+            const legendContainer = document.getElementById('chartLegend');
+            legendContainer.innerHTML = '';
+
+            if (chartData.labels.length === 0) {
+                legendContainer.innerHTML = '<div class="no-data">期间内无调用数据</div>';
+                return;
+            }
+
+            if (period === 'total') {
+                const totalOverall = chartData.data.reduce((sum, item) => sum + item, 0);
+                const legendItemsHtml = chartData.labels.map((label, index) => {
+                    const value = chartData.data[index];
+                    const percentage = totalOverall > 0 ? ((value / totalOverall) * 100).toFixed(1) : 0;
+                    return '<div class="legend-item">' +
+                        '<div class="legend-color" style="background-color: ' + barColors[index % barColors.length] + '"></div>' +
+                        '<span>' + label + ': ' + value + ' 次 (' + percentage + '%)</span>' +
+                        '</div>';
+                }).join('');
+                legendContainer.innerHTML = legendItemsHtml;
+            } else {
+                const periodText = period === 'today' ? '24小时' : (period === 'week' ? '7天' : '30天');
+                legendContainer.innerHTML = 
+                    '<div class="legend-item">' +
+                        '<div class="legend-color" style="background-color: #6366f1"></div>' +
+                        '<span>总调用次数 (柱状)</span>' +
+                    '</div>' +
+                    '<div class="legend-item">' +
+                        '<div class="legend-line" style="background-color: #ef4444"></div>' +
+                        '<span>调用趋势 (折线)</span>' +
+                    '</div>' +
+                    '<p style="font-size: 0.85rem; color: #666; margin-top: 10px;">' +
+                        '显示过去 ' + periodText + ' 的总调用数据。' +
+                    '</p>';
+            }
+        }
+
+        function switchPeriod(newPeriod) {
+            currentPeriod = newPeriod;
+            document.querySelectorAll('.time-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelector('[data-period="' + newPeriod + '"]').classList.add('active');
+            createCombinedChart(currentPeriod);
+        }
+
+        // 工具函数
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        function copyToClipboard(text) {
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(() => {
+                    showToast('已复制: ' + text);
+                }, () => {
+                    fallbackCopy(text);
+                });
+            } else {
+                fallbackCopy(text);
+            }
+        }
+
+        function fallbackCopy(text) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy');
+                showToast('已复制: ' + text);
+            } catch (err) {
+                showToast('复制失败');
+            }
+            document.body.removeChild(ta);
+        }
+
+        // 刷新数据
+        async function refreshData() {
+            const data = await loadStatsData();
+            if (data) {
+                renderStatsCards(data);
+                updatePerformanceInfo(data.performance);
+                createCombinedChart(currentPeriod);
+                showToast('数据已刷新');
+            }
+        }
+
+        // 页面初始化
+        document.addEventListener('DOMContentLoaded', async function() {
+            currentDomain = getCurrentDomain();
+            updateDomainReferences();
+            renderEndpointList();
+            
+            const data = await loadStatsData();
+            if (data) {
+                renderStatsCards(data);
+                updatePerformanceInfo(data.performance);
+                createCombinedChart(currentPeriod);
+            }
+
+            // 时间切换按钮事件
+            document.querySelectorAll('.time-tab').forEach(tab => {
+                tab.addEventListener('click', function() {
+                    switchPeriod(this.dataset.period);
+                });
+            });
+        });
+
+        // 定时刷新
+        setInterval(refreshData, 60000);
+    </script>
+</body>
+</html>
