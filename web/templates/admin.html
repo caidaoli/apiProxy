@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API映射管理 - 管理面板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f5f7ff',
+                            100: '#ebf0ff',
+                            500: '#667eea',
+                            600: '#5a67d8',
+                            700: '#4c51bf',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        .toast.show {
+            animation: slideIn 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-500 via-purple-500 to-purple-600 min-h-screen">
+    <!-- 登录界面 -->
+    <div id="loginPage" class="flex justify-center items-center min-h-screen p-5">
+        <div class="bg-white rounded-2xl shadow-2xl p-10 w-full max-w-md">
+            <div class="text-center mb-8">
+                <div class="text-5xl mb-4">🔐</div>
+                <h1 class="text-3xl font-bold text-gray-800 mb-2">管理员登录</h1>
+                <p class="text-gray-600">请输入管理令牌以访问API映射管理面板</p>
+            </div>
+            <form onsubmit="handleLogin(event)" class="space-y-6">
+                <div>
+                    <label for="tokenInput" class="block text-sm font-semibold text-gray-700 mb-2">
+                        管理令牌 (ADMIN_TOKEN)
+                    </label>
+                    <input
+                        type="password"
+                        id="tokenInput"
+                        placeholder="请输入管理令牌"
+                        required
+                        autocomplete="off"
+                        class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+                    >
+                </div>
+                <button type="submit" class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 rounded-lg font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
+                    登录
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 管理面板 -->
+    <div id="adminPanel" class="hidden">
+        <div class="max-w-7xl mx-auto p-5">
+            <!-- 头部 -->
+            <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h1 class="text-3xl font-bold text-gray-800 flex items-center gap-2">
+                            <span>🔧</span>
+                            <span>API映射管理</span>
+                        </h1>
+                        <div class="mt-2 inline-flex items-center bg-gray-100 px-4 py-2 rounded-lg text-sm text-gray-600">
+                            <span id="statsInfo">加载中...</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap gap-3">
+                        <button onclick="loadMappings()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors flex items-center gap-2">
+                            <span>🔄</span>
+                            <span>刷新</span>
+                        </button>
+                        <button onclick="window.location.href='/'" class="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium transition-colors flex items-center gap-2">
+                            <span>📊</span>
+                            <span>统计面板</span>
+                        </button>
+                        <button onclick="logout()" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors">
+                            退出
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 工具栏 -->
+            <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div class="flex-1 w-full md:max-w-md">
+                        <input
+                            type="text"
+                            id="searchInput"
+                            placeholder="🔍 搜索前缀或URL..."
+                            oninput="filterMappings()"
+                            class="w-full px-4 py-2.5 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+                        >
+                    </div>
+                    <div class="flex gap-3 w-full md:w-auto">
+                        <button
+                            id="batchDeleteBtn"
+                            onclick="batchDeleteMappings()"
+                            class="hidden px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-all flex items-center gap-2 shadow-md hover:shadow-lg">
+                            <span>🗑️</span>
+                            <span>删除选中 (<span id="selectedCount">0</span>)</span>
+                        </button>
+                        <button onclick="showAddModal()" class="flex-1 md:flex-none px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-lg font-medium transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2">
+                            <span>➕</span>
+                            <span>添加映射</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 表格容器 -->
+            <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
+                            <tr>
+                                <th class="px-6 py-4 text-left">
+                                    <input
+                                        type="checkbox"
+                                        id="selectAll"
+                                        onchange="toggleSelectAll()"
+                                        class="w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                                    >
+                                </th>
+                                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                                    前缀路径
+                                </th>
+                                <th class="px-6 py-4 text-left text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                                    目标URL
+                                </th>
+                                <th class="px-6 py-4 text-center text-sm font-semibold text-gray-700 uppercase tracking-wider">
+                                    操作
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="mappingsTable" class="divide-y divide-gray-200">
+                            <tr>
+                                <td colspan="4" class="px-6 py-16 text-center text-gray-500">
+                                    <div class="flex flex-col items-center">
+                                        <div class="text-6xl mb-4">📦</div>
+                                        <div class="text-lg font-medium">加载中...</div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加/编辑模态框 -->
+    <div id="mappingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-5" onclick="handleModalClick(event)">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg transform transition-all" onclick="event.stopPropagation()">
+            <div class="p-8">
+                <h2 id="modalTitle" class="text-2xl font-bold text-gray-800 mb-6">添加API映射</h2>
+                <form onsubmit="handleSaveMapping(event)" class="space-y-6">
+                    <div>
+                        <label for="prefixInput" class="block text-sm font-semibold text-gray-700 mb-2">
+                            前缀路径 <span class="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            id="prefixInput"
+                            placeholder="/openai"
+                            required
+                            pattern="^/[a-zA-Z0-9_-]+$"
+                            title="必须以/开头,只能包含字母、数字、下划线和连字符"
+                            class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                        >
+                        <p class="mt-2 text-xs text-gray-500">示例: /openai, /claude, /gemini</p>
+                    </div>
+                    <div>
+                        <label for="targetInput" class="block text-sm font-semibold text-gray-700 mb-2">
+                            目标URL <span class="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="url"
+                            id="targetInput"
+                            placeholder="https://api.openai.com"
+                            required
+                            class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+                        >
+                        <p class="mt-2 text-xs text-gray-500">完整的API端点URL</p>
+                    </div>
+                    <div class="flex gap-3 pt-4">
+                        <button type="button" onclick="closeModal()" class="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-semibold transition-colors">
+                            取消
+                        </button>
+                        <button type="submit" class="flex-1 px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-lg font-semibold transition-all shadow-md hover:shadow-lg">
+                            保存
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast通知 -->
+    <div id="toast" class="hidden fixed bottom-6 right-6 px-6 py-4 rounded-lg shadow-2xl text-white font-medium z-50 max-w-md"></div>
+
+    <script>
+        let adminToken = '';
+        let allMappings = {};
+        let isEditMode = false;
+        let editingPrefix = '';
+        let selectedPrefixes = new Set();
+
+        // 登录处理
+        async function handleLogin(event) {
+            event.preventDefault();
+            const token = document.getElementById('tokenInput').value;
+
+            try {
+                const response = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    adminToken = token;
+                    localStorage.setItem('adminToken', token);
+                    showAdminPanel();
+                    loadMappings();
+                    showToast('登录成功 ✓', 'success');
+                } else {
+                    showToast(data.error || '登录失败', 'error');
+                }
+            } catch (error) {
+                showToast('网络错误: ' + error.message, 'error');
+            }
+        }
+
+        // 显示管理面板
+        function showAdminPanel() {
+            document.getElementById('loginPage').classList.add('hidden');
+            document.getElementById('adminPanel').classList.remove('hidden');
+        }
+
+        // 退出登录
+        function logout() {
+            adminToken = '';
+            localStorage.removeItem('adminToken');
+            document.getElementById('loginPage').classList.remove('hidden');
+            document.getElementById('adminPanel').classList.add('hidden');
+            document.getElementById('tokenInput').value = '';
+            selectedPrefixes.clear();
+            updateBatchDeleteButton();
+            showToast('已退出登录', 'success');
+        }
+
+        // 加载所有映射
+        async function loadMappings() {
+            try {
+                const response = await fetch('/api/mappings', {
+                    headers: { 'Authorization': `Bearer ${adminToken}` }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    allMappings = data.mappings || {};
+                    updateStatsInfo(data.count, data.version);
+                    renderMappings(allMappings);
+                    selectedPrefixes.clear();
+                    updateBatchDeleteButton();
+                } else {
+                    showToast(data.error || '加载失败', 'error');
+                }
+            } catch (error) {
+                showToast('加载失败: ' + error.message, 'error');
+            }
+        }
+
+        // 更新统计信息
+        function updateStatsInfo(count, version) {
+            document.getElementById('statsInfo').textContent =
+                `共 ${count} 个映射 | 版本 ${version}`;
+        }
+
+        // 渲染映射表格
+        function renderMappings(mappings) {
+            const tbody = document.getElementById('mappingsTable');
+
+            if (Object.keys(mappings).length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="px-6 py-20 text-center">
+                            <div class="flex flex-col items-center">
+                                <div class="text-7xl mb-4">📭</div>
+                                <div class="text-xl font-semibold text-gray-700 mb-2">暂无API映射</div>
+                                <p class="text-gray-500">点击"添加映射"按钮创建第一个映射</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            const sortedPrefixes = Object.keys(mappings).sort();
+
+            tbody.innerHTML = sortedPrefixes.map(prefix => `
+                <tr data-prefix="${prefix}" class="hover:bg-gray-50 transition-colors">
+                    <td class="px-6 py-4">
+                        <input
+                            type="checkbox"
+                            class="mapping-checkbox w-5 h-5 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                            data-prefix="${prefix}"
+                            onchange="handleCheckboxChange()"
+                            ${selectedPrefixes.has(prefix) ? 'checked' : ''}
+                        >
+                    </td>
+                    <td class="px-6 py-4">
+                        <span class="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-800 rounded-lg font-semibold font-mono text-sm">
+                            ${prefix}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4">
+                        <span class="text-gray-600 text-sm break-all">${mappings[prefix]}</span>
+                    </td>
+                    <td class="px-6 py-4">
+                        <div class="flex justify-center gap-2">
+                            <button onclick="editMapping('${prefix}')" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-medium transition-colors text-sm flex items-center gap-1.5">
+                                <span>✏️</span>
+                                <span>编辑</span>
+                            </button>
+                            <button onclick="deleteMapping('${prefix}')" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors text-sm flex items-center gap-1.5">
+                                <span>🗑️</span>
+                                <span>删除</span>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // 处理复选框变化
+        function handleCheckboxChange() {
+            selectedPrefixes.clear();
+            document.querySelectorAll('.mapping-checkbox:checked').forEach(cb => {
+                selectedPrefixes.add(cb.dataset.prefix);
+            });
+            updateBatchDeleteButton();
+            updateSelectAllCheckbox();
+        }
+
+        // 全选/取消全选
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.mapping-checkbox');
+
+            checkboxes.forEach(cb => {
+                cb.checked = selectAll.checked;
+            });
+
+            handleCheckboxChange();
+        }
+
+        // 更新全选复选框状态
+        function updateSelectAllCheckbox() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.mapping-checkbox');
+            const checkedCount = document.querySelectorAll('.mapping-checkbox:checked').length;
+
+            if (checkboxes.length === 0) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            } else if (checkedCount === 0) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            } else if (checkedCount === checkboxes.length) {
+                selectAll.checked = true;
+                selectAll.indeterminate = false;
+            } else {
+                selectAll.checked = false;
+                selectAll.indeterminate = true;
+            }
+        }
+
+        // 更新批量删除按钮
+        function updateBatchDeleteButton() {
+            const btn = document.getElementById('batchDeleteBtn');
+            const count = document.getElementById('selectedCount');
+
+            if (selectedPrefixes.size > 0) {
+                btn.classList.remove('hidden');
+                count.textContent = selectedPrefixes.size;
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+
+        // 批量删除
+        async function batchDeleteMappings() {
+            if (selectedPrefixes.size === 0) return;
+
+            const prefixList = Array.from(selectedPrefixes).join('", "');
+            if (!confirm(`确定要删除以下 ${selectedPrefixes.size} 个映射吗?\n\n"${prefixList}"\n\n这将立即生效,所有使用这些前缀的请求将无法代理。`)) {
+                return;
+            }
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const prefix of selectedPrefixes) {
+                try {
+                    const response = await fetch(`/api/mappings${prefix}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${adminToken}` }
+                    });
+
+                    if (response.ok) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (error) {
+                    failCount++;
+                }
+            }
+
+            if (successCount > 0) {
+                showToast(`成功删除 ${successCount} 个映射${failCount > 0 ? `, ${failCount} 个失败` : ''}`, failCount > 0 ? 'warning' : 'success');
+                loadMappings();
+            } else {
+                showToast('批量删除失败', 'error');
+            }
+        }
+
+        // 过滤映射
+        function filterMappings() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#mappingsTable tr[data-prefix]');
+
+            rows.forEach(row => {
+                const prefix = row.getAttribute('data-prefix');
+                if (!prefix) return;
+
+                const target = allMappings[prefix];
+                const matches = prefix.toLowerCase().includes(searchTerm) ||
+                               target.toLowerCase().includes(searchTerm);
+
+                row.style.display = matches ? '' : 'none';
+            });
+        }
+
+        // 显示添加模态框
+        function showAddModal() {
+            isEditMode = false;
+            document.getElementById('modalTitle').textContent = '添加API映射';
+            document.getElementById('prefixInput').value = '';
+            document.getElementById('targetInput').value = '';
+            document.getElementById('prefixInput').disabled = false;
+            document.getElementById('mappingModal').classList.remove('hidden');
+        }
+
+        // 编辑映射
+        function editMapping(prefix) {
+            isEditMode = true;
+            editingPrefix = prefix;
+            document.getElementById('modalTitle').textContent = '编辑API映射';
+            document.getElementById('prefixInput').value = prefix;
+            document.getElementById('targetInput').value = allMappings[prefix];
+            document.getElementById('prefixInput').disabled = true;
+            document.getElementById('mappingModal').classList.remove('hidden');
+        }
+
+        // 关闭模态框
+        function closeModal() {
+            document.getElementById('mappingModal').classList.add('hidden');
+        }
+
+        // 处理模态框点击
+        function handleModalClick(event) {
+            if (event.target.id === 'mappingModal') {
+                closeModal();
+            }
+        }
+
+        // 保存映射
+        async function handleSaveMapping(event) {
+            event.preventDefault();
+
+            const prefix = document.getElementById('prefixInput').value.trim();
+            const target = document.getElementById('targetInput').value.trim();
+
+            try {
+                let response;
+                if (isEditMode) {
+                    response = await fetch(`/api/mappings${editingPrefix}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${adminToken}`
+                        },
+                        body: JSON.stringify({ target })
+                    });
+                } else {
+                    response = await fetch('/api/mappings', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${adminToken}`
+                        },
+                        body: JSON.stringify({ prefix, target })
+                    });
+                }
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast(isEditMode ? '映射已更新 ✓' : '映射已添加 ✓', 'success');
+                    closeModal();
+                    loadMappings();
+                } else {
+                    showToast(data.error || '保存失败', 'error');
+                }
+            } catch (error) {
+                showToast('保存失败: ' + error.message, 'error');
+            }
+        }
+
+        // 删除映射
+        async function deleteMapping(prefix) {
+            if (!confirm(`确定要删除映射 "${prefix}" 吗?\n\n这将立即生效,所有使用此前缀的请求将无法代理。`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/mappings${prefix}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${adminToken}` }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showToast('映射已删除 ✓', 'success');
+                    loadMappings();
+                } else {
+                    showToast(data.error || '删除失败', 'error');
+                }
+            } catch (error) {
+                showToast('删除失败: ' + error.message, 'error');
+            }
+        }
+
+        // 显示Toast
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `fixed bottom-6 right-6 px-6 py-4 rounded-lg shadow-2xl text-white font-medium z-50 max-w-md show ${
+                type === 'success' ? 'bg-emerald-500' :
+                type === 'error' ? 'bg-red-500' :
+                'bg-amber-500'
+            }`;
+
+            setTimeout(() => {
+                toast.className = toast.className.replace('show', 'hidden');
+            }, 3000);
+        }
+
+        // 页面加载时检查登录状态
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedToken = localStorage.getItem('adminToken');
+            if (savedToken) {
+                document.getElementById('tokenInput').value = savedToken;
+                handleLogin({ preventDefault: () => {} });
+            }
+        });
+    </script>
+</body>
+</html>

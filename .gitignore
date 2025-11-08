@@ -1,3 +1,8 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
 # Logs
 logs
 *.log
@@ -97,6 +102,7 @@ dist
 
 # Go build output
 api-proxy
+apiProxy
 *.exe
 *.dll
 *.so
@@ -109,3 +115,4 @@ api-proxy
 *.out 
 proxy-server
 deno-proxy
+.serena

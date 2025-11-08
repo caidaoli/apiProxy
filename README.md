@@ -14,6 +14,9 @@ app_port: 8000
 
 ## 🚀 主要特性
 - 支持 OpenAI、Gemini、Claude、XAI 等主流AI API代理
+- **🔧 动态配置管理**：API映射存储在Redis,支持热更新无需重启
+- **📊 Web管理界面**：可视化增删改API映射,实时生效(/admin)
+- **🔐 安全认证**：管理接口Token认证保护
 - 支持网页代理（/proxy/https://...）
 - 实时统计API调用次数，支持24h/7d/30d/总计多维度
 - 统计面板美观直观，支持一键复制代理地址
@@ -390,19 +393,157 @@ signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 <-quit
 ```
 
+## 📦 Redis配置与管理功能
+
+### 环境变量配置
+
+本项目需要Redis来存储API映射配置。请配置以下环境变量:
+
+```bash
+# Redis配置 (URL格式)
+API_PROXY_REDIS_URL=redis://:password@host:port/db
+
+# 管理功能配置
+ADMIN_TOKEN=your_secure_admin_token
+```
+
+**URL格式说明**:
+- 标准连接: `redis://:password@localhost:6379/0`
+- 无密码: `redis://localhost:6379/0`
+- TLS加密: `rediss://:password@secure-redis.example.com:6380/0`
+- Docker环境: `redis://:password@redis:6379/0`
+
+**推荐配置方式**:
+```bash
+# 1. 复制环境变量模板
+cp .env.example .env
+
+# 2. 编辑.env文件,设置安全的密码和令牌
+# 生成安全Token示例: openssl rand -hex 32
+
+# 3. 程序启动时会自动加载 .env 文件
+# 无需手动 export 环境变量
+```
+
+**注意**: 程序启动时会自动加载当前目录的 `.env` 文件,如果文件不存在则使用系统环境变量。
+
+### Redis数据初始化
+
+首次使用前,需要初始化Redis数据:
+
+```bash
+# 方式1: 使用初始化脚本(推荐)
+# 如果已配置 .env 文件,直接运行:
+go run scripts/init_redis.go
+
+# 或使用环境变量:
+API_PROXY_REDIS_URL=redis://:your_password@localhost:6379/0 go run scripts/init_redis.go
+
+# 方式2: 手动初始化(Docker环境)
+docker-compose exec redis redis-cli -a your_password
+> HSET apiproxy:mappings "/openai" "https://api.openai.com"
+> HSET apiproxy:mappings "/claude" "https://api.anthropic.com"
+# ... 添加更多映射
+```
+
+### 🎛️ 管理界面使用
+
+访问 `http://localhost:8000/admin` 打开管理面板:
+
+1. **登录**: 输入ADMIN_TOKEN环境变量中设置的令牌
+2. **查看映射**: 自动加载并显示所有API映射
+3. **添加映射**: 点击"添加映射"按钮,填写前缀(如/openai)和目标URL
+4. **编辑映射**: 点击"编辑"按钮修改目标URL
+5. **删除映射**: 点击"删除"按钮移除映射(会弹出确认)
+6. **实时生效**: 所有修改立即生效,无需重启服务
+
+**管理API接口**:
+```bash
+# 获取所有映射
+curl -H "Authorization: Bearer your_admin_token" \
+  http://localhost:8000/api/mappings
+
+# 添加新映射
+curl -X POST \
+  -H "Authorization: Bearer your_admin_token" \
+  -H "Content-Type: application/json" \
+  -d '{"prefix":"/newapi","target":"https://api.example.com"}' \
+  http://localhost:8000/api/mappings
+
+# 更新映射
+curl -X PUT \
+  -H "Authorization: Bearer your_admin_token" \
+  -H "Content-Type: application/json" \
+  -d '{"target":"https://newapi.example.com"}' \
+  http://localhost:8000/api/mappings/newapi
+
+# 删除映射
+curl -X DELETE \
+  -H "Authorization: Bearer your_admin_token" \
+  http://localhost:8000/api/mappings/newapi
+```
+
 ## 快速开始
 
 ### 本地运行
+
+**前提条件**: Redis服务器已启动
+
 ```bash
+# 1. 安装依赖
 go mod download
-go run main.go stats.go
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件,设置 API_PROXY_REDIS_URL 和 ADMIN_TOKEN
+
+# 3. 启动Redis(如果没有运行)
+docker run -d -p 6379:6379 --name redis redis:7-alpine \
+  --requirepass your_secure_password
+
+# 4. 初始化Redis数据
+go run scripts/init_redis.go
+
+# 5. 启动服务 (会自动加载 .env 文件)
+go run main.go stats.go redis.go admin.go
 # 默认监听8000端口
 ```
 
-### Docker 部署
+### Docker Compose 部署(推荐)
+
 ```bash
+# 1. 复制并配置环境变量
+cp .env.example .env
+# 编辑.env文件,设置REDIS_PASSWORD和ADMIN_TOKEN
+
+# 2. 启动所有服务(Redis + API代理)
+docker-compose up -d
+
+# 3. 初始化Redis数据(首次运行)
+docker-compose exec api-proxy go run scripts/init_redis.go
+
+# 4. 查看日志
+docker-compose logs -f api-proxy
+
+# 5. 停止服务
+docker-compose down
+```
+
+### Docker 单独部署
+```bash
+# 1. 构建镜像
 docker build -t api-proxy-server .
-docker run -d -p 8000:8000 api-proxy-server
+
+# 2. 启动Redis
+docker run -d -p 6379:6379 --name redis \
+  redis:7-alpine --requirepass your_password
+
+# 3. 启动API代理(链接Redis)
+docker run -d -p 8000:8000 \
+  -e API_PROXY_REDIS_URL=redis://:your_password@redis:6379/0 \
+  -e ADMIN_TOKEN=your_token \
+  --link redis:redis \
+  api-proxy-server
 ```
 
 ## 主要路由说明
