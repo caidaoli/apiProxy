@@ -33,6 +33,46 @@
      opacity: 0.9;
  }
 
+ .go-badge, .performance-badge {
+     display: inline-block;
+     font-size: 0.5rem;
+     padding: 4px 8px;
+     border-radius: 4px;
+     margin-left: 8px;
+     font-weight: 600;
+     vertical-align: middle;
+ }
+
+ .go-badge {
+     background: rgba(16, 185, 129, 0.9);
+     color: white;
+ }
+
+ .performance-badge {
+     background: rgba(245, 158, 11, 0.9);
+     color: white;
+ }
+
+ .admin-link {
+     display: inline-block;
+     margin-top: 16px;
+     padding: 12px 24px;
+     background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
+     color: white;
+     text-decoration: none;
+     border-radius: 50px;
+     font-size: 1rem;
+     font-weight: 600;
+     box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);
+     transition: all 0.3s ease;
+ }
+
+ .admin-link:hover {
+     background: linear-gradient(135deg, #ea580c 0%, #dc2626 100%);
+     transform: translateY(-2px);
+     box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+ }
+
  .stats-grid {
      display: grid;
      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -163,6 +203,10 @@
 
  .total-icon {
      background: #6366f1;
+ }
+
+ .perf-icon {
+     background: #059669;
  }
 
  .stat-row {
@@ -366,6 +410,11 @@
 
      .header h1 {
          font-size: 2rem;
+     }
+
+     .admin-link {
+         font-size: 0.9rem;
+         padding: 10px 20px;
      }
 
      .chart-grid {
