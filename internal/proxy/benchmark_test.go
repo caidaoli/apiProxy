@@ -25,7 +25,7 @@ func (m mockMappingManager) GetPrefixes() []string {
 	return []string{"test"}
 }
 
-// BenchmarkTransparentProxy V2架构透明代理性能基准
+// BenchmarkTransparentProxy 透明代理性能基准测试
 func BenchmarkTransparentProxy(b *testing.B) {
 	// 创建后端服务器
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +34,7 @@ func BenchmarkTransparentProxy(b *testing.B) {
 	}))
 	defer backend.Close()
 
-	// 创建V2架构的TransparentProxy
+	// 创建透明代理
 	proxy := NewTransparentProxy(mockMappingManager{targetURL: backend.URL})
 
 	b.ResetTimer()
@@ -51,12 +51,8 @@ func BenchmarkTransparentProxy(b *testing.B) {
 	})
 }
 
-// 注意: 旧版本Handler已被删除，因为它未在生产代码中使用
-// V2架构的TransparentProxy性能更优，内存使用更低
-// 历史性能对比数据:
-// - BenchmarkTransparentProxy:       15000 ns/op,  500 B/op,  5 allocs/op
-// - BenchmarkTransparentProxyLegacy: 150000 ns/op, 5000 B/op, 50 allocs/op
-// V2架构性能提升: 10倍吞吐量，10倍内存效率
+// 注意: TransparentProxy 是唯一实现，性能优异
+// 性能特征: 15000 ns/op, 500 B/op, 5 allocs/op
 
 // BenchmarkLargeBody 大请求体性能测试
 func BenchmarkLargeBody(b *testing.B) {
@@ -106,13 +102,13 @@ func BenchmarkHeaderCopy(b *testing.B) {
 	}
 }
 
-// 性能基准测试结果（V2架构，M1 Mac）:
+// 性能基准测试结果（M1 Mac）:
 //
 // BenchmarkTransparentProxy-8      100000    15000 ns/op     500 B/op     5 allocs/op
 // BenchmarkLargeBody-8                100 10000000 ns/op  10 MiB B/op    10 allocs/op
 // BenchmarkHeaderCopy-8           1000000     1000 ns/op     512 B/op     1 allocs/op
 //
-// V2架构性能优势：
+// 性能优势：
 // - 流式处理：大文件上传时内存使用恒定32KB
 // - 透明代理：不修改请求/响应内容，符合RFC 7230
 // - 零拷贝：直接传递请求体，避免内存分配
