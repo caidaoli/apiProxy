@@ -6,7 +6,7 @@
 
 - **🔥 完全透明** - 严格遵循 RFC 7230，不修改请求/响应内容
 - **💧 流式传输** - 边收边发，恒定内存使用（32KB缓冲区）
-- **⚡ 高性能** - 无锁统计系统，支持数万级并发
+- **⚡ 高性能** - 原子操作统计系统，支持数万级并发
 - **🚀 低延迟** - 平均响应时间 <50ms，P99 <100ms
 - **📊 实时监控** - 内置统计面板和管理界面
 - **🔧 热更新** - Redis 存储配置，动态加载无需重启
@@ -15,7 +15,7 @@
 
 ### 本地运行
 
-**前提条件**: Go 1.23+ 和 Redis
+**前提条件**: Go 1.25.0+ 和 Redis
 
 ```bash
 # 1. 克隆项目
@@ -32,12 +32,12 @@ cp .env.example .env
 # 4. 启动 Redis
 docker run -d -p 6379:6379 --name redis redis:7-alpine
 
-# 5. 初始化映射数据
-go run scripts/init_redis.go
-
-# 6. 启动服务
+# 5. 启动服务
 go run main.go
 # 默认监听 http://localhost:8000
+
+# 6. 通过管理界面添加 API 映射
+# 访问 http://localhost:8000/admin 添加映射配置
 ```
 
 ### Docker Compose 部署（推荐）
@@ -50,11 +50,11 @@ cp .env.example .env
 # 2. 启动所有服务
 docker-compose up -d
 
-# 3. 初始化数据（仅首次）
-docker-compose exec api-proxy go run scripts/init_redis.go
-
-# 4. 查看日志
+# 3. 查看日志
 docker-compose logs -f api-proxy
+
+# 4. 通过管理界面添加 API 映射
+# 访问 http://localhost:8000/admin 添加映射配置
 ```
 
 ## 环境变量
@@ -94,22 +94,26 @@ func (p *TransparentProxy) ProxyRequest(w http.ResponseWriter, r *http.Request) 
 }
 ```
 
-### 无锁统计系统
+### 高性能统计系统
 ```go
-// 基于 channel 的无锁设计
+// 基于原子操作和读写锁的高性能设计
 type Collector struct {
-    eventChan chan RequestEvent  // 缓冲 10000 事件
-    droppedEvents int64           // 监控丢弃数
+    requestCount      int64         // 原子计数器
+    errorCount        int64         // 原子计数器
+    responseTimeSum   int64         // 原子累加
+    responseTimeCount int64         // 原子累加
+
+    mu        sync.RWMutex          // 保护 endpoints map
+    endpoints map[string]*EndpointStats
 }
 
-// 非阻塞记录（50ns/op, 0 allocs）
+// 原子操作记录（64ns/op, 0 allocs）
 func (c *Collector) RecordRequest(endpoint string) {
-    select {
-    case c.eventChan <- event:
-        // 成功
-    default:
-        atomic.AddInt64(&c.droppedEvents, 1)  // 记录丢弃
-    }
+    atomic.AddInt64(&c.requestCount, 1)
+}
+
+func (c *Collector) RecordError() {
+    atomic.AddInt64(&c.errorCount, 1)
 }
 ```
 
@@ -280,9 +284,9 @@ apiProxy/
 
 ## 技术栈
 
-- **Go 1.23+** - 高性能并发编程
-- **Gin** - HTTP 框架
-- **Redis** - 配置存储
+- **Go 1.25.0+** - 高性能并发编程
+- **Gin 1.11.0** - HTTP 框架
+- **Redis 7.4+** - 配置存储
 - **Docker** - 容器化部署
 
 ## 许可证
