@@ -534,6 +534,11 @@ func TestValidateMapping(t *testing.T) {
 		{"prefix without slash", "api", "http://example.com", true},
 		{"invalid URL", "/api", "not-a-url", true},
 		{"wrong scheme", "/api", "ftp://example.com", true},
+		// SSRF 防护测试
+		{"private IP localhost", "/api", "http://127.0.0.1", true},
+		{"private IP 10.x", "/api", "http://10.0.0.1", true},
+		{"private IP 192.168.x", "/api", "http://192.168.1.1", true},
+		{"private IP 172.16.x", "/api", "http://172.16.0.1", true},
 	}
 
 	for _, tt := range tests {
@@ -603,5 +608,71 @@ func TestMappingManager_Concurrent(t *testing.T) {
 	// 验证最终状态一致
 	if mm.Count() == 0 {
 		t.Error("should have mappings after concurrent operations")
+	}
+}
+
+// TestMappingManager_ForceReload 测试强制重载
+func TestMappingManager_ForceReload(t *testing.T) {
+	ctx := context.Background()
+	mr, client := setupTestRedis(t)
+	defer mr.Close()
+	defer client.Close()
+
+	// 设置初始映射
+	err := client.HSet(ctx, KeyMappings, "/api", "http://api.example.com").Err()
+	if err != nil {
+		t.Fatalf("failed to set mapping: %v", err)
+	}
+	client.Set(ctx, KeyMappingsVersion, "1", 0)
+
+	// 创建 manager
+	manager := &MappingManager{
+		client:   client,
+		cache:    make(map[string]string),
+		stopChan: make(chan struct{}),
+	}
+	defer manager.Close()
+
+	// 初始化
+	err = manager.reloadMappings(ctx)
+	if err != nil {
+		t.Fatalf("failed to reload: %v", err)
+	}
+	manager.initialized.Store(true)
+
+	// 验证初始映射
+	target, err := manager.GetMapping(ctx, "/api")
+	if err != nil {
+		t.Fatalf("failed to get mapping: %v", err)
+	}
+	if target != "http://api.example.com" {
+		t.Errorf("expected http://api.example.com, got %s", target)
+	}
+
+	// 直接在 Redis 中修改映射
+	err = client.HSet(ctx, KeyMappings, "/api", "http://new.example.com").Err()
+	if err != nil {
+		t.Fatalf("failed to update mapping in redis: %v", err)
+	}
+
+	// 不强制重载，应该还是旧值（缓存）
+	target, _ = manager.GetMapping(ctx, "/api")
+	if target != "http://api.example.com" {
+		t.Errorf("expected cached value http://api.example.com, got %s", target)
+	}
+
+	// 强制重载
+	err = manager.ForceReload(ctx)
+	if err != nil {
+		t.Fatalf("failed to force reload: %v", err)
+	}
+
+	// 现在应该是新值
+	target, err = manager.GetMapping(ctx, "/api")
+	if err != nil {
+		t.Fatalf("failed to get mapping after reload: %v", err)
+	}
+	if target != "http://new.example.com" {
+		t.Errorf("expected http://new.example.com after reload, got %s", target)
 	}
 }

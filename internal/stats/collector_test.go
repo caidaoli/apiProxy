@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestNewCollector(t *testing.T) {
@@ -314,3 +317,143 @@ func TestCollector_EmptyEndpoint(t *testing.T) {
 		t.Error("empty endpoint count incorrect")
 	}
 }
+
+// TestCollector_GetRequests 测试获取请求列表
+func TestCollector_GetRequests(t *testing.T) {
+	c := NewCollector(nil)
+
+	// 初始应该为空
+	requests := c.GetRequests()
+	if len(requests) != 0 {
+		t.Errorf("expected empty requests, got %d", len(requests))
+	}
+
+	// 记录几个请求
+	c.RecordRequest("/api/test1")
+	c.RecordRequest("/api/test2")
+	c.RecordRequest("/api/test3")
+
+	requests = c.GetRequests()
+	if len(requests) != 3 {
+		t.Errorf("expected 3 requests, got %d", len(requests))
+	}
+
+	// 验证深拷贝（修改返回值不应影响内部状态）
+	requests[0].Endpoint = "modified"
+	newRequests := c.GetRequests()
+	if newRequests[0].Endpoint == "modified" {
+		t.Error("GetRequests should return deep copy")
+	}
+}
+
+// TestCollector_GetPerformanceMetrics 测试性能指标
+// TestCollector_GetPerformanceMetrics 测试性能指标
+func TestCollector_GetPerformanceMetrics(t *testing.T) {
+	c := NewCollector(nil)
+
+	// 记录一些请求和错误
+	c.RecordRequest("/api/test")
+	c.UpdateResponseMetrics(100*time.Millisecond)
+
+	c.RecordRequest("/api/test")
+	c.UpdateResponseMetrics(200*time.Millisecond)
+	
+	c.RecordRequest("/api/test")
+	c.RecordError("/api/test")
+
+	// 等待缓存过期后再获取
+	time.Sleep(6 * time.Second)
+	
+	metrics := c.GetPerformanceMetrics()
+	if metrics == nil {
+		t.Fatal("metrics should not be nil")
+	}
+
+	// 验证平均响应时间 (100ms + 200ms) / 2 = 150ms
+	if metrics.AvgResponseTimeMs != 150 {
+		t.Errorf("expected avg response time 150ms, got %d", metrics.AvgResponseTimeMs)
+	}
+
+	// 3个请求，1个错误，错误率应该是 33.33%
+	expectedErrorRate := (1.0 / 3.0) * 100
+	if metrics.ErrorRate < expectedErrorRate-1 || metrics.ErrorRate > expectedErrorRate+1 {
+		t.Errorf("expected error rate ~%.2f%%, got %.2f%%", expectedErrorRate, metrics.ErrorRate)
+	}
+	
+	// 验证内存和协程数据存在
+	if metrics.MemoryUsageMB <= 0 {
+		t.Error("memory usage should be > 0")
+	}
+	
+	if metrics.GoroutineCount <= 0 {
+		t.Error("goroutine count should be > 0")
+	}
+}
+// TestCollector_GetPerformanceMetrics_Cache 测试性能指标缓存
+func TestCollector_GetPerformanceMetrics_Cache(t *testing.T) {
+	c := NewCollector(nil)
+
+	c.RecordRequest("/api/test")
+
+	// 第一次调用
+	metrics1 := c.GetPerformanceMetrics()
+	
+	// 立即第二次调用应该返回缓存
+	metrics2 := c.GetPerformanceMetrics()
+
+	// 应该是同一个对象
+	if metrics1 != metrics2 {
+		t.Error("should return cached metrics")
+	}
+
+	// 等待缓存过期
+	time.Sleep(6 * time.Second)
+	
+	// 再次调用应该重新计算
+	metrics3 := c.GetPerformanceMetrics()
+	if metrics1 == metrics3 {
+		t.Error("should recalculate metrics after cache expiry")
+	}
+}
+
+// TestCollector_SaveAndLoadRedis 测试 Redis 持久化
+func TestCollector_SaveAndLoadRedis(t *testing.T) {
+	// 使用 miniredis 模拟
+	mr := miniredis.RunT(t)
+	defer mr.Close()
+
+	client := redis.NewClient(&redis.Options{
+		Addr: mr.Addr(),
+	})
+	defer client.Close()
+
+	// 创建 collector 并记录数据
+	c1 := NewCollector(client)
+	c1.RecordRequest("/api/test1")
+	c1.RecordRequest("/api/test2")
+	c1.RecordError("/api/test3")
+
+	// 保存到 Redis
+	ctx := context.Background()
+	if err := c1.SaveToRedis(ctx); err != nil {
+		t.Fatalf("failed to save to redis: %v", err)
+	}
+
+	// 创建新的 collector 并从 Redis 加载
+	c2 := NewCollector(client)
+	if err := c2.LoadFromRedis(ctx); err != nil {
+		t.Fatalf("failed to load from redis: %v", err)
+	}
+
+	// 验证数据一致
+	if c2.GetRequestCount() != c1.GetRequestCount() {
+		t.Errorf("request count mismatch: expected %d, got %d",
+			c1.GetRequestCount(), c2.GetRequestCount())
+	}
+
+	if c2.GetErrorCount() != c1.GetErrorCount() {
+		t.Errorf("error count mismatch: expected %d, got %d",
+			c1.GetErrorCount(), c2.GetErrorCount())
+	}
+}
+
