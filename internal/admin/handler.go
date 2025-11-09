@@ -22,14 +22,24 @@ type MappingManager interface {
 	GetVersion() int64
 }
 
-// 全局变量
-var mappingManager MappingManager
+// Handler 管理接口处理器（DIP原则：依赖注入）
+type Handler struct {
+	mapper     MappingManager
+	adminToken string
+}
 
-// AdminAuthMiddleware Token认证中间件
-func AdminAuthMiddleware() gin.HandlerFunc {
+// NewHandler 创建管理接口处理器
+func NewHandler(mapper MappingManager) *Handler {
+	return &Handler{
+		mapper:     mapper,
+		adminToken: os.Getenv("ADMIN_TOKEN"), // 初始化时读取，避免每次请求都读取
+	}
+}
+
+// authMiddleware Token认证中间件
+func (h *Handler) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		expectedToken := os.Getenv("ADMIN_TOKEN")
-		if expectedToken == "" {
+		if h.adminToken == "" {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"error": "Admin functionality is disabled (ADMIN_TOKEN not set)",
 			})
@@ -50,7 +60,7 @@ func AdminAuthMiddleware() gin.HandlerFunc {
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		token = strings.TrimSpace(token)
 
-		if token != expectedToken {
+		if token != h.adminToken {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Invalid admin token",
 			})
@@ -63,21 +73,21 @@ func AdminAuthMiddleware() gin.HandlerFunc {
 }
 
 // handleGetAllMappings 获取所有API映射
-func handleGetAllMappings(c *gin.Context) {
-	mappings := mappingManager.GetAllMappings()
+func (h *Handler) handleGetAllMappings(c *gin.Context) {
+	mappings := h.mapper.GetAllMappings()
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":  true,
 		"count":    len(mappings),
 		"mappings": mappings,
-		"version":  mappingManager.GetVersion(),
+		"version":  h.mapper.GetVersion(),
 	})
 }
 
 // handleGetPublicMappings 返回所有映射(公开访问,只读)
 // 用于前端页面动态加载端点列表
-func handleGetPublicMappings(c *gin.Context) {
-	mappings := mappingManager.GetAllMappings()
+func (h *Handler) handleGetPublicMappings(c *gin.Context) {
+	mappings := h.mapper.GetAllMappings()
 
 	// 转换为前端需要的格式: {"/prefix": "https://target"}
 	publicMappings := make(map[string]string)
@@ -99,7 +109,7 @@ type MappingRequest struct {
 }
 
 // handleAddMapping 添加新映射
-func handleAddMapping(c *gin.Context) {
+func (h *Handler) handleAddMapping(c *gin.Context) {
 	var req MappingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -109,7 +119,7 @@ func handleAddMapping(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	if err := mappingManager.AddMapping(ctx, req.Prefix, req.Target); err != nil {
+	if err := h.mapper.AddMapping(ctx, req.Prefix, req.Target); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
@@ -127,7 +137,7 @@ func handleAddMapping(c *gin.Context) {
 }
 
 // handleUpdateMapping 更新映射
-func handleUpdateMapping(c *gin.Context) {
+func (h *Handler) handleUpdateMapping(c *gin.Context) {
 	prefix := "/" + c.Param("prefix")
 
 	var req struct {
@@ -142,7 +152,7 @@ func handleUpdateMapping(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	if err := mappingManager.UpdateMapping(ctx, prefix, req.Target); err != nil {
+	if err := h.mapper.UpdateMapping(ctx, prefix, req.Target); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
@@ -160,11 +170,11 @@ func handleUpdateMapping(c *gin.Context) {
 }
 
 // handleDeleteMapping 删除映射
-func handleDeleteMapping(c *gin.Context) {
+func (h *Handler) handleDeleteMapping(c *gin.Context) {
 	prefix := "/" + c.Param("prefix")
 
 	ctx := c.Request.Context()
-	if err := mappingManager.DeleteMapping(ctx, prefix); err != nil {
+	if err := h.mapper.DeleteMapping(ctx, prefix); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": err.Error(),
 		})
@@ -179,12 +189,12 @@ func handleDeleteMapping(c *gin.Context) {
 }
 
 // handleAdminPage 管理页面
-func handleAdminPage(c *gin.Context) {
+func (h *Handler) handleAdminPage(c *gin.Context) {
 	c.File("web/templates/admin.html")
 }
 
 // handleAdminLogin 验证Token（用于前端登录）
-func handleAdminLogin(c *gin.Context) {
+func (h *Handler) handleAdminLogin(c *gin.Context) {
 	var req struct {
 		Token string `json:"token" binding:"required"`
 	}
@@ -196,15 +206,14 @@ func handleAdminLogin(c *gin.Context) {
 		return
 	}
 
-	expectedToken := os.Getenv("ADMIN_TOKEN")
-	if expectedToken == "" {
+	if h.adminToken == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "Admin functionality is disabled",
 		})
 		return
 	}
 
-	if req.Token != expectedToken {
+	if req.Token != h.adminToken {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "Invalid token",
 		})
@@ -217,31 +226,24 @@ func handleAdminLogin(c *gin.Context) {
 	})
 }
 
-// SetMappingManager 设置映射管理器
-func SetMappingManager(mm MappingManager) {
-	mappingManager = mm
-}
-
 // SetupRoutes 设置管理路由
-func SetupRoutes(r *gin.Engine, mm MappingManager) {
-	mappingManager = mm
-
+func (h *Handler) SetupRoutes(r *gin.Engine) {
 	// 管理页面 (无需认证,页面内验证)
-	r.GET("/admin", handleAdminPage)
+	r.GET("/admin", h.handleAdminPage)
 
 	// 登录验证接口
-	r.POST("/api/admin/login", handleAdminLogin)
+	r.POST("/api/admin/login", h.handleAdminLogin)
 
 	// 公开只读映射API (无需认证,用于前端页面)
-	r.GET("/api/public/mappings", handleGetPublicMappings)
+	r.GET("/api/public/mappings", h.handleGetPublicMappings)
 
 	// 管理API (需要Token认证)
 	adminAPI := r.Group("/api/mappings")
-	adminAPI.Use(AdminAuthMiddleware())
+	adminAPI.Use(h.authMiddleware())
 	{
-		adminAPI.GET("", handleGetAllMappings)           // 获取所有映射
-		adminAPI.POST("", handleAddMapping)              // 添加映射
-		adminAPI.PUT("/:prefix", handleUpdateMapping)    // 更新映射
-		adminAPI.DELETE("/:prefix", handleDeleteMapping) // 删除映射
+		adminAPI.GET("", h.handleGetAllMappings)           // 获取所有映射
+		adminAPI.POST("", h.handleAddMapping)              // 添加映射
+		adminAPI.PUT("/:prefix", h.handleUpdateMapping)    // 更新映射
+		adminAPI.DELETE("/:prefix", h.handleDeleteMapping) // 删除映射
 	}
 }

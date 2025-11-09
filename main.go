@@ -48,11 +48,11 @@ func main() {
 	}
 	defer mappingManager.Close()
 
-	// 创建优化后的统计收集器（V2架构）
+	// 创建统计收集器
 	statsCollector := stats.NewCollector(mappingManager.GetClient())
 	defer statsCollector.Close()
 
-	// 创建透明代理（V2架构）
+	// 创建透明代理
 	transparentProxy := proxy.NewTransparentProxy(mappingManager)
 
 	// 创建路由
@@ -94,7 +94,7 @@ func main() {
 	// 静态文件服务
 	r.Static("/static", "./web/static")
 
-	// 统计API路由（使用V2收集器）
+	// 统计API路由
 	r.GET("/stats", func(c *gin.Context) {
 		stats := statsCollector.GetStats()
 		c.JSON(200, gin.H{
@@ -106,10 +106,11 @@ func main() {
 		})
 	})
 
-	// 管理路由
-	admin.SetupRoutes(r, mappingManager)
+	// 管理路由（依赖注入，无全局变量）
+	adminHandler := admin.NewHandler(mappingManager)
+	adminHandler.SetupRoutes(r)
 
-	// API代理路由 - 使用TransparentProxy（V2架构）
+	// API代理路由 - 使用透明代理转发
 	prefixes := mappingManager.GetPrefixes()
 	for _, prefix := range prefixes {
 		// 创建局部变量避免闭包陷阱
@@ -118,7 +119,7 @@ func main() {
 			// 只提取path参数，prefix已经在闭包中
 			path := c.Param("path")
 
-			// 使用透明代理转发（V2架构）
+			// 使用透明代理转发
 			if err := transparentProxy.ProxyRequest(c.Writer, c.Request, currentPrefix, path); err != nil {
 				log.Printf("Proxy error: %v", err)
 				c.JSON(500, gin.H{"error": err.Error()})
@@ -132,8 +133,7 @@ func main() {
 		port = "8000"
 	}
 
-	log.Printf("🚀 API代理服务器已启动 (V2优化架构) 端口:%s", port)
-	log.Printf("⚡ V2特性: 透明代理 + 无锁统计 + 流式处理")
+	log.Printf("🚀 API代理服务器已启动 端口:%s", port)
 	log.Printf("📊 访问 http://localhost:%s 查看统计信息", port)
 	log.Printf("🔧 访问 http://localhost:%s/admin 管理API映射", port)
 
