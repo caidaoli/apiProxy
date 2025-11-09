@@ -48,14 +48,9 @@ type MappingManager struct {
 func parseRedisURL(redisURL string) (*redis.Options, error) {
 	// 默认配置
 	opts := &redis.Options{
-		Addr:         "localhost:6379",
-		Password:     "",
-		DB:           0,
-		DialTimeout:  30 * time.Second, // 增加到30秒，适应云服务
-		ReadTimeout:  10 * time.Second, // 增加到10秒
-		WriteTimeout: 10 * time.Second, // 增加到10秒
-		PoolSize:     10,
-		MinIdleConns: 2,
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
 	}
 
 	if redisURL == "" {

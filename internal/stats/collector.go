@@ -420,20 +420,27 @@ func (c *Collector) SaveToRedis(ctx context.Context) error {
 		"error_count":         atomic.LoadInt64(&c.errorCount),
 		"response_time_sum":   atomic.LoadInt64(&c.responseTimeSum),
 		"response_time_count": atomic.LoadInt64(&c.responseTimeCount),
-		"total":               c.stats.Total,
 		"last_update":         time.Now().Unix(),
 	}
+
+	// ✅ 修复: 从Stats.Total读取(需要加锁保护)
+	c.stats.mu.RLock()
+	counters["total"] = c.stats.Total
+	c.stats.mu.RUnlock()
+
 	pipe.HSet(ctx, KeyStatsCounters, counters)
 
 	// 保存每个endpoint的统计数据
 	c.stats.mu.RLock()
 	for prefix, stats := range c.stats.Endpoints {
 		endpointKey := KeyStatsEndpointPrefix + prefix
+
+		// ✅ 修复: 使用atomic.LoadInt64读取并发更新的字段
 		endpointData := map[string]interface{}{
-			"total": stats.Total,
-			"today": stats.Today,
-			"week":  stats.Week,
-			"month": stats.Month,
+			"total": atomic.LoadInt64(&stats.Total),
+			"today": atomic.LoadInt64(&stats.Today),
+			"week":  atomic.LoadInt64(&stats.Week),
+			"month": atomic.LoadInt64(&stats.Month),
 		}
 		pipe.HSet(ctx, endpointKey, endpointData)
 	}
@@ -450,88 +457,107 @@ func (c *Collector) LoadFromRedis(ctx context.Context) error {
 		return fmt.Errorf("redis client is not initialized")
 	}
 
+	// ✅ 修复: 统一错误处理策略 - 采用容错策略,部分失败不影响整体
+	var loadErrors []string
+
 	// 加载全局计数器
 	counters, err := c.redisClient.HGetAll(ctx, KeyStatsCounters).Result()
 	if err != nil {
-		return fmt.Errorf("failed to load counters: %w", err)
-	}
-
-	// 如果没有数据，返回nil（不是错误）
-	if len(counters) == 0 {
-		return nil
-	}
-
-	// 恢复计数器
-	if val, ok := counters["request_count"]; ok {
-		if count, err := strconv.ParseInt(val, 10, 64); err == nil {
-			atomic.StoreInt64(&c.requestCount, count)
+		loadErrors = append(loadErrors, fmt.Sprintf("failed to load counters: %v", err))
+	} else if len(counters) > 0 {
+		// 恢复计数器
+		if val, ok := counters["request_count"]; ok {
+			if count, err := strconv.ParseInt(val, 10, 64); err == nil {
+				atomic.StoreInt64(&c.requestCount, count)
+			}
 		}
-	}
-	if val, ok := counters["error_count"]; ok {
-		if count, err := strconv.ParseInt(val, 10, 64); err == nil {
-			atomic.StoreInt64(&c.errorCount, count)
+		if val, ok := counters["error_count"]; ok {
+			if count, err := strconv.ParseInt(val, 10, 64); err == nil {
+				atomic.StoreInt64(&c.errorCount, count)
+			}
 		}
-	}
-	if val, ok := counters["response_time_sum"]; ok {
-		if sum, err := strconv.ParseInt(val, 10, 64); err == nil {
-			atomic.StoreInt64(&c.responseTimeSum, sum)
+		if val, ok := counters["response_time_sum"]; ok {
+			if sum, err := strconv.ParseInt(val, 10, 64); err == nil {
+				atomic.StoreInt64(&c.responseTimeSum, sum)
+			}
 		}
-	}
-	if val, ok := counters["response_time_count"]; ok {
-		if count, err := strconv.ParseInt(val, 10, 64); err == nil {
-			atomic.StoreInt64(&c.responseTimeCount, count)
+		if val, ok := counters["response_time_count"]; ok {
+			if count, err := strconv.ParseInt(val, 10, 64); err == nil {
+				atomic.StoreInt64(&c.responseTimeCount, count)
+			}
 		}
-	}
-	if val, ok := counters["total"]; ok {
-		if total, err := strconv.ParseInt(val, 10, 64); err == nil {
-			c.stats.Total = total
+		if val, ok := counters["total"]; ok {
+			if total, err := strconv.ParseInt(val, 10, 64); err == nil {
+				c.stats.mu.Lock()
+				c.stats.Total = total
+				c.stats.mu.Unlock()
+			}
 		}
 	}
 
 	// 加载所有endpoint统计数据
 	keys, err := c.redisClient.Keys(ctx, KeyStatsEndpointPrefix+"*").Result()
 	if err != nil {
-		return fmt.Errorf("failed to get endpoint keys: %w", err)
+		loadErrors = append(loadErrors, fmt.Sprintf("failed to get endpoint keys: %v", err))
+		// ✅ 继续处理,不返回错误
+	} else {
+		c.stats.mu.Lock()
+		defer c.stats.mu.Unlock()
+
+		loadedCount := 0
+		for _, key := range keys {
+			prefix := key[len(KeyStatsEndpointPrefix):]
+			data, err := c.redisClient.HGetAll(ctx, key).Result()
+			if err != nil {
+				log.Printf("⚠️  Failed to load stats for endpoint %s: %v", prefix, err)
+				continue
+			}
+
+			stats := &EndpointStats{}
+			var totalCount int64
+
+			if val, ok := data["total"]; ok {
+				if total, err := strconv.ParseInt(val, 10, 64); err == nil {
+					atomic.StoreInt64(&stats.Total, total)
+					totalCount = total
+				}
+			}
+			if val, ok := data["today"]; ok {
+				if today, err := strconv.ParseInt(val, 10, 64); err == nil {
+					atomic.StoreInt64(&stats.Today, today)
+				}
+			}
+			if val, ok := data["week"]; ok {
+				if week, err := strconv.ParseInt(val, 10, 64); err == nil {
+					atomic.StoreInt64(&stats.Week, week)
+				}
+			}
+			if val, ok := data["month"]; ok {
+				if month, err := strconv.ParseInt(val, 10, 64); err == nil {
+					atomic.StoreInt64(&stats.Month, month)
+				}
+			}
+
+			c.stats.Endpoints[prefix] = stats
+
+			// ✅ 关键修复: 同时恢复timeWindow.counters,确保updateSummaryStats不会覆盖数据
+			if _, exists := c.stats.timeWindow.counters[prefix]; !exists {
+				c.stats.timeWindow.counters[prefix] = &atomic.Int64{}
+			}
+			c.stats.timeWindow.counters[prefix].Store(totalCount)
+
+			loadedCount++
+		}
+
+		if loadedCount > 0 {
+			log.Printf("✅ 从Redis恢复了 %d 个endpoint的统计数据", loadedCount)
+		}
 	}
 
-	c.stats.mu.Lock()
-	defer c.stats.mu.Unlock()
-
-	for _, key := range keys {
-		prefix := key[len(KeyStatsEndpointPrefix):]
-		data, err := c.redisClient.HGetAll(ctx, key).Result()
-		if err != nil {
-			log.Printf("⚠️  Failed to load stats for endpoint %s: %v", prefix, err)
-			continue
-		}
-
-		stats := &EndpointStats{}
-		if val, ok := data["total"]; ok {
-			if total, err := strconv.ParseInt(val, 10, 64); err == nil {
-				stats.Total = total
-			}
-		}
-		if val, ok := data["today"]; ok {
-			if today, err := strconv.ParseInt(val, 10, 64); err == nil {
-				stats.Today = today
-			}
-		}
-		if val, ok := data["week"]; ok {
-			if week, err := strconv.ParseInt(val, 10, 64); err == nil {
-				stats.Week = week
-			}
-		}
-		if val, ok := data["month"]; ok {
-			if month, err := strconv.ParseInt(val, 10, 64); err == nil {
-				stats.Month = month
-			}
-		}
-
-		c.stats.Endpoints[prefix] = stats
+	// ✅ 如果有错误,记录警告但不返回错误(容错策略)
+	if len(loadErrors) > 0 {
+		log.Printf("⚠️  加载统计数据时遇到部分错误: %v", loadErrors)
 	}
-
-	loadedEndpoints := len(keys)
-	log.Printf("📊 从Redis恢复了 %d 个endpoint的统计数据", loadedEndpoints)
 
 	return nil
 }

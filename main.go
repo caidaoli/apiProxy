@@ -140,12 +140,12 @@ func main() {
 
 	// 保存统计数据到Redis
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer saveCancel() // ✅ 修复: 确保context资源释放,即使发生panic
 	if err := statsCollector.SaveToRedis(saveCtx); err != nil {
 		log.Printf("❌ 关闭时保存统计数据失败: %v", err)
 	} else {
 		log.Println("💾 统计数据已保存到Redis")
 	}
-	saveCancel()
 
 	// 优雅关闭HTTP服务器
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
