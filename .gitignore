@@ -116,3 +116,4 @@ apiProxy*
 proxy-server
 deno-proxy
 .serena
+AGENTS.md
