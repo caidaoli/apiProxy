@@ -11,12 +11,12 @@ import (
 
 // MockCollector 用于测试的模拟统计收集器
 type MockCollector struct {
-	recordedRequests  map[string]int
-	recordedErrors    map[string]int
-	responseTimes     []time.Duration
-	requestCount      int64
-	errorCount        int64
-	droppedEvents     int64
+	recordedRequests map[string]int
+	recordedErrors   map[string]int
+	responseTimes    []time.Duration
+	requestCount     int64
+	errorCount       int64
+	droppedEvents    int64
 }
 
 func NewMockCollector() *MockCollector {

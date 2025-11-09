@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: api-proxy-redis
     restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD:-your_redis_password}
@@ -17,7 +15,12 @@ services:
       retries: 5
 
   api-proxy:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - TARGETOS=linux
+        - TARGETARCH=amd64
     container_name: api-proxy-server
     depends_on:
       redis:

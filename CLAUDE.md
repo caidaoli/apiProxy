@@ -177,16 +177,27 @@ go build -o apiproxy main.go
 ### Docker 部署
 
 ```bash
-# Docker Compose(推荐)
-cd deployments/docker
-docker-compose up -d
+# Docker Compose(推荐 - 自动启用 BuildKit)
+DOCKER_BUILDKIT=1 docker-compose up -d
 
 # 查看日志
 docker-compose logs -f api-proxy
 
 # 停止服务
 docker-compose down
+
+# 多平台构建(ARM64/AMD64)
+docker buildx build --platform linux/amd64,linux/arm64 -t apiproxy:latest .
+
+# 单平台快速构建(利用缓存)
+DOCKER_BUILDKIT=1 docker build -t apiproxy:latest .
 ```
+
+**Docker 优化特性:**
+- ✅ BuildKit 缓存层 - 依赖和构建缓存持久化,二次构建秒级完成
+- ✅ 多平台支持 - 原生支持 AMD64/ARM64 交叉编译
+- ✅ 镜像优化 - 使用 `-ldflags="-s -w"` 减小体积约 30%
+- ✅ 最终镜像 - 约 43MB(Alpine 基础镜像 + 优化后的二进制)
 
 ### 功能测试
 
@@ -210,6 +221,12 @@ curl -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
 ```
 
 ## 环境配置
+
+**依赖要求:**
+- Go 1.25.0+
+- Redis 7.4+ (推荐使用 redis:7.4-alpine Docker 镜像)
+  - Redis 7.2+ 支持 go-redis v9.16+ 的新特性(MAINT_NOTIFICATIONS)
+  - 使用旧版本会产生警告但不影响功能
 
 **必需环境变量:**
 ```bash
@@ -312,7 +329,7 @@ if err := stats.RecordRequest(prefix); err != nil {
 - `internal/stats/collector.go`: 无锁统计收集器(channel+批处理)
 - `internal/admin/handler.go`: Web管理界面
 - `main.go`: 入口文件,路由设置,服务启动
-- `deployments/docker/`: Docker相关配置
+- `Dockerfile`, `docker-compose.yml`, `.env.example`: Docker部署配置文件
 
 ## 开发注意事项
 
