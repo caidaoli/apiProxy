@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -120,21 +121,15 @@ func main() {
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		// 查找匹配的prefix
 		prefixes := mappingManager.GetPrefixes()
-		for _, prefix := range prefixes {
-			if len(path) >= len(prefix) && path[:len(prefix)] == prefix {
-				// 提取剩余路径
-				remainingPath := path[len(prefix):]
-
-				// 使用透明代理转发
-				if err := transparentProxy.ProxyRequest(c.Writer, c.Request, prefix, remainingPath); err != nil {
-					log.Printf("Proxy error for %s: %v", path, err)
-					c.JSON(500, gin.H{"error": err.Error()})
-					return
-				}
+		if prefix, ok := findMatchingPrefix(path, prefixes); ok {
+			remainingPath := remainingPathAfterPrefix(path, prefix)
+			if err := transparentProxy.ProxyRequest(c.Writer, c.Request, prefix, remainingPath); err != nil {
+				log.Printf("Proxy error for %s: %v", path, err)
+				c.JSON(500, gin.H{"error": err.Error()})
 				return
 			}
+			return
 		}
 
 		// 没有匹配的映射
@@ -209,4 +204,44 @@ func handleIndex(c *gin.Context) {
 func handleRobotsTxt(c *gin.Context) {
 	c.Header("Content-Type", "text/plain")
 	c.String(200, "User-agent: *\nDisallow: /\n")
+}
+
+// findMatchingPrefix 返回最先匹配 path 的前缀(假设传入按长度排序)
+func findMatchingPrefix(path string, prefixes []string) (string, bool) {
+	for _, prefix := range prefixes {
+		if matchesPrefix(path, prefix) {
+			return prefix, true
+		}
+	}
+	return "", false
+}
+
+func matchesPrefix(path, prefix string) bool {
+	if prefix == "" {
+		return false
+	}
+	if prefix == "/" {
+		return true
+	}
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	if len(path) == len(prefix) {
+		return true
+	}
+	if strings.HasSuffix(prefix, "/") {
+		return true
+	}
+	return path[len(prefix)] == '/'
+}
+
+func remainingPathAfterPrefix(path, prefix string) string {
+	if len(path) < len(prefix) {
+		return ""
+	}
+	remainder := path[len(prefix):]
+	if remainder != "" && remainder[0] != '/' {
+		remainder = "/" + remainder
+	}
+	return remainder
 }

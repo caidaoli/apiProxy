@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -508,6 +509,13 @@ func (m *MappingManager) GetPrefixes() []string {
 	for prefix := range m.cache {
 		prefixes = append(prefixes, prefix)
 	}
+
+	sort.Slice(prefixes, func(i, j int) bool {
+		if len(prefixes[i]) == len(prefixes[j]) {
+			return prefixes[i] < prefixes[j]
+		}
+		return len(prefixes[i]) > len(prefixes[j])
+	})
 
 	return prefixes
 }

@@ -366,6 +366,27 @@ func TestMappingManager_GetPrefixes(t *testing.T) {
 	}
 }
 
+func TestMappingManager_GetPrefixesSorted(t *testing.T) {
+	mm := &MappingManager{
+		cache: map[string]string{
+			"/a":         "http://a",
+			"/openai":    "http://openai",
+			"/openai/v1": "http://openai-v1",
+		},
+	}
+
+	got := mm.GetPrefixes()
+	expected := []string{"/openai/v1", "/openai", "/a"}
+	if len(got) != len(expected) {
+		t.Fatalf("expected %d prefixes, got %d", len(expected), len(got))
+	}
+	for i := range expected {
+		if got[i] != expected[i] {
+			t.Fatalf("expected order %v, got %v", expected, got)
+		}
+	}
+}
+
 func TestMappingManager_ReloadMappings(t *testing.T) {
 	mr, client := setupTestRedis(t)
 	defer mr.Close()

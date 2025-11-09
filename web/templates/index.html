@@ -142,6 +142,18 @@ https://api.anthropic.com/v1/messages
         let apiMapping = {}; // 动态加载的API映射
         const barColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#64748b', '#14b8a6', '#a855f7', '#eab308', '#22c55e', '#3b82f6'];
 
+        const htmlEscapeMap = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+
+        function escapeHTML(value) {
+            return String(value).replace(/[&<>"']/g, char => htmlEscapeMap[char] || char);
+        }
+
         // 获取当前域名
         function getCurrentDomain() {
             const protocol = window.location.protocol;
@@ -255,6 +267,15 @@ https://api.anthropic.com/v1/messages
         function renderEndpointList() {
             let endpointListHTML = '';
 
+            const appendEndpoint = (endpoint) => {
+                const safeEndpoint = escapeHTML(endpoint);
+                const safeUrl = escapeHTML(`${currentDomain}${endpoint}`);
+                endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
+                            <div class="endpoint-path">${safeEndpoint}</div>
+                            <div class="endpoint-url">${safeUrl}</div>
+                        </div>`;
+            };
+
             // 获取有数据的端点并按调用次数排序，取前8个
             if (rawStatsData && rawStatsData.endpoints && Object.keys(rawStatsData.endpoints).length > 0) {
                 const activeEndpoints = Object.keys(rawStatsData.endpoints)
@@ -265,29 +286,20 @@ https://api.anthropic.com/v1/messages
                 // 如果有活跃端点，显示活跃端点；否则显示所有映射的端点
                 if (activeEndpoints.length > 0) {
                     activeEndpoints.forEach(endpoint => {
-                        endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
-                            <div class="endpoint-path">${endpoint}</div>
-                            <div class="endpoint-url">${currentDomain}${endpoint}</div>
-                        </div>`;
+                        appendEndpoint(endpoint);
                     });
                 } else {
                     // 有统计数据但没有活跃端点，显示所有映射的端点
                     const endpoints = Object.keys(apiMapping).slice(0, 8);
                     endpoints.forEach(endpoint => {
-                        endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
-                            <div class="endpoint-path">${endpoint}</div>
-                            <div class="endpoint-url">${currentDomain}${endpoint}</div>
-                        </div>`;
+                        appendEndpoint(endpoint);
                     });
                 }
             } else {
                 // 如果没有统计数据，显示所有端点（前8个）
                 const endpoints = Object.keys(apiMapping).slice(0, 8);
                 endpoints.forEach(endpoint => {
-                    endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
-                        <div class="endpoint-path">${endpoint}</div>
-                        <div class="endpoint-url">${currentDomain}${endpoint}</div>
-                    </div>`;
+                    appendEndpoint(endpoint);
                 });
             }
 

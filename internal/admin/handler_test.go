@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 
@@ -79,6 +80,10 @@ func setupTestRouter(handler *Handler) *gin.Engine {
 	return r
 }
 
+func addAuthCookie(req *http.Request) {
+	req.AddCookie(&http.Cookie{Name: adminSessionCookie, Value: url.QueryEscape("test-token")})
+}
+
 func TestNewHandler(t *testing.T) {
 	mapper := &MockMappingManager{
 		mappings: make(map[string]string),
@@ -120,7 +125,7 @@ func TestHandler_GetAllMappings(t *testing.T) {
 
 	// 创建请求
 	req, _ := http.NewRequest("GET", "/api/mappings", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
+	addAuthCookie(req)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -192,7 +197,7 @@ func TestHandler_AddMapping(t *testing.T) {
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequest("POST", "/api/mappings", bytes.NewBuffer(body))
-	req.Header.Set("Authorization", "Bearer test-token")
+	addAuthCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -228,7 +233,7 @@ func TestHandler_UpdateMapping(t *testing.T) {
 	body, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequest("PUT", "/api/mappings/api", bytes.NewBuffer(body))
-	req.Header.Set("Authorization", "Bearer test-token")
+	addAuthCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -241,6 +246,40 @@ func TestHandler_UpdateMapping(t *testing.T) {
 	// 验证映射被更新
 	if mapper.mappings["/api"] != "http://new.example.com" {
 		t.Error("mapping not updated")
+	}
+}
+
+func TestHandler_UpdateMapping_MultiSegment(t *testing.T) {
+	mapper := &MockMappingManager{
+		mappings: map[string]string{
+			"/api/v1": "http://old.example.com",
+		},
+	}
+
+	os.Setenv("ADMIN_TOKEN", "test-token")
+	defer os.Unsetenv("ADMIN_TOKEN")
+
+	handler := NewHandler(mapper)
+	r := setupTestRouter(handler)
+
+	reqBody := map[string]string{
+		"target": "http://new.example.com",
+	}
+	body, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequest("PUT", "/api/mappings/api/v1", bytes.NewBuffer(body))
+	addAuthCookie(req)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	if mapper.mappings["/api/v1"] != "http://new.example.com" {
+		t.Fatalf("mapping not updated for multi segment prefix: %+v", mapper.mappings)
 	}
 }
 
@@ -258,7 +297,7 @@ func TestHandler_DeleteMapping(t *testing.T) {
 	r := setupTestRouter(handler)
 
 	req, _ := http.NewRequest("DELETE", "/api/mappings/api", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
+	addAuthCookie(req)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -270,6 +309,34 @@ func TestHandler_DeleteMapping(t *testing.T) {
 	// 验证映射被删除
 	if _, exists := mapper.mappings["/api"]; exists {
 		t.Error("mapping should be deleted")
+	}
+}
+
+func TestHandler_DeleteMapping_MultiSegment(t *testing.T) {
+	mapper := &MockMappingManager{
+		mappings: map[string]string{
+			"/api/v1": "http://example.com",
+		},
+	}
+
+	os.Setenv("ADMIN_TOKEN", "test-token")
+	defer os.Unsetenv("ADMIN_TOKEN")
+
+	handler := NewHandler(mapper)
+	r := setupTestRouter(handler)
+
+	req, _ := http.NewRequest("DELETE", "/api/mappings/api/v1", nil)
+	addAuthCookie(req)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	if _, exists := mapper.mappings["/api/v1"]; exists {
+		t.Fatal("mapping should be deleted for multi segment prefix")
 	}
 }
 
@@ -306,9 +373,9 @@ func TestHandler_AuthMiddleware_InvalidToken(t *testing.T) {
 	handler := NewHandler(mapper)
 	r := setupTestRouter(handler)
 
-	// 错误的token
+	// 错误的token cookie
 	req, _ := http.NewRequest("GET", "/api/mappings", nil)
-	req.Header.Set("Authorization", "Bearer wrong-token")
+	req.AddCookie(&http.Cookie{Name: adminSessionCookie, Value: url.QueryEscape("wrong-token")})
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -330,13 +397,34 @@ func TestHandler_AuthMiddleware_NoAdminToken(t *testing.T) {
 	r := setupTestRouter(handler)
 
 	req, _ := http.NewRequest("GET", "/api/mappings", nil)
-	req.Header.Set("Authorization", "Bearer any-token")
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Errorf("expected status 503, got %d", w.Code)
+	}
+}
+
+func TestHandler_AuthMiddleware_Cookie(t *testing.T) {
+	mapper := &MockMappingManager{
+		mappings: make(map[string]string),
+	}
+
+	os.Setenv("ADMIN_TOKEN", "test-token")
+	defer os.Unsetenv("ADMIN_TOKEN")
+
+	handler := NewHandler(mapper)
+	r := setupTestRouter(handler)
+
+	req, _ := http.NewRequest("GET", "/api/mappings", nil)
+	req.AddCookie(&http.Cookie{Name: adminSessionCookie, Value: url.QueryEscape("test-token")})
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 when cookie matches, got %d", w.Code)
 	}
 }
 
@@ -372,6 +460,19 @@ func TestHandler_AdminLogin_Success(t *testing.T) {
 	if response["success"] != true {
 		t.Error("expected success true")
 	}
+
+	foundCookie := false
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == adminSessionCookie {
+			foundCookie = true
+			if cookie.Value != url.QueryEscape("test-token") {
+				t.Errorf("expected encoded token in cookie, got %s", cookie.Value)
+			}
+		}
+	}
+	if !foundCookie {
+		t.Error("expected admin session cookie to be set")
+	}
 }
 
 func TestHandler_AdminLogin_InvalidToken(t *testing.T) {
@@ -401,6 +502,37 @@ func TestHandler_AdminLogin_InvalidToken(t *testing.T) {
 	}
 }
 
+func TestHandler_AdminLogout(t *testing.T) {
+	mapper := &MockMappingManager{
+		mappings: make(map[string]string),
+	}
+
+	handler := NewHandler(mapper)
+	r := setupTestRouter(handler)
+
+	req, _ := http.NewRequest("POST", "/api/admin/logout", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	foundCookie := false
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == adminSessionCookie {
+			foundCookie = true
+			if cookie.MaxAge != -1 {
+				t.Error("expected logout cookie to be expired")
+			}
+		}
+	}
+	if !foundCookie {
+		t.Error("expected logout to return clearing cookie")
+	}
+}
+
 func TestHandler_AddMapping_InvalidJSON(t *testing.T) {
 	mapper := &MockMappingManager{
 		mappings: make(map[string]string),
@@ -414,7 +546,7 @@ func TestHandler_AddMapping_InvalidJSON(t *testing.T) {
 
 	// 无效的JSON
 	req, _ := http.NewRequest("POST", "/api/mappings", bytes.NewBufferString("invalid json"))
-	req.Header.Set("Authorization", "Bearer test-token")
+	addAuthCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -422,39 +554,5 @@ func TestHandler_AddMapping_InvalidJSON(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", w.Code)
-	}
-}
-
-func TestHandler_AuthMiddleware_BearerPrefix(t *testing.T) {
-	mapper := &MockMappingManager{
-		mappings: make(map[string]string),
-	}
-
-	os.Setenv("ADMIN_TOKEN", "test-token")
-	defer os.Unsetenv("ADMIN_TOKEN")
-
-	handler := NewHandler(mapper)
-	r := setupTestRouter(handler)
-
-	// 测试Bearer前缀
-	req, _ := http.NewRequest("GET", "/api/mappings", nil)
-	req.Header.Set("Authorization", "Bearer test-token")
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status 200 with Bearer prefix, got %d", w.Code)
-	}
-
-	// 测试无Bearer前缀
-	req2, _ := http.NewRequest("GET", "/api/mappings", nil)
-	req2.Header.Set("Authorization", "test-token")
-	w2 := httptest.NewRecorder()
-
-	r.ServeHTTP(w2, req2)
-
-	if w2.Code != http.StatusOK {
-		t.Errorf("expected status 200 without Bearer prefix, got %d", w2.Code)
 	}
 }

@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+const adminSessionCookie = "api_proxy_admin"
 
 // MappingManager 映射管理器接口
 type MappingManager interface {
@@ -49,20 +53,8 @@ func (h *Handler) authMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Missing Authorization header",
-			})
-			c.Abort()
-			return
-		}
-
-		// 支持 "Bearer <token>" 或直接 "<token>"
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		token = strings.TrimSpace(token)
-
-		if token != h.adminToken {
+		token := h.getSessionToken(c)
+		if token == "" || token != h.adminToken {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Invalid admin token",
 			})
@@ -140,7 +132,11 @@ func (h *Handler) handleAddMapping(c *gin.Context) {
 
 // handleUpdateMapping 更新映射
 func (h *Handler) handleUpdateMapping(c *gin.Context) {
-	prefix := "/" + c.Param("prefix")
+	prefix, err := extractPrefixParam(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	var req struct {
 		Target string `json:"target" binding:"required"`
@@ -173,7 +169,11 @@ func (h *Handler) handleUpdateMapping(c *gin.Context) {
 
 // handleDeleteMapping 删除映射
 func (h *Handler) handleDeleteMapping(c *gin.Context) {
-	prefix := "/" + c.Param("prefix")
+	prefix, err := extractPrefixParam(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	ctx := c.Request.Context()
 	if err := h.mapper.DeleteMapping(ctx, prefix); err != nil {
@@ -240,10 +240,17 @@ func (h *Handler) handleAdminLogin(c *gin.Context) {
 		return
 	}
 
+	h.setSessionCookie(c)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Authentication successful",
 	})
+}
+
+func (h *Handler) handleAdminLogout(c *gin.Context) {
+	h.clearSessionCookie(c)
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // SetupRoutes 设置管理路由
@@ -253,6 +260,7 @@ func (h *Handler) SetupRoutes(r *gin.Engine) {
 
 	// 登录验证接口
 	r.POST("/api/admin/login", h.handleAdminLogin)
+	r.POST("/api/admin/logout", h.handleAdminLogout)
 
 	// 公开只读映射API (无需认证,用于前端页面)
 	r.GET("/api/public/mappings", h.handleGetPublicMappings)
@@ -263,8 +271,60 @@ func (h *Handler) SetupRoutes(r *gin.Engine) {
 	{
 		adminAPI.GET("", h.handleGetAllMappings)           // 获取所有映射
 		adminAPI.POST("", h.handleAddMapping)              // 添加映射
-		adminAPI.PUT("/:prefix", h.handleUpdateMapping)    // 更新映射
-		adminAPI.DELETE("/:prefix", h.handleDeleteMapping) // 删除映射
+		adminAPI.PUT("/*prefix", h.handleUpdateMapping)    // 更新映射
+		adminAPI.DELETE("/*prefix", h.handleDeleteMapping) // 删除映射
 		adminAPI.POST("/reload", h.handleForceReload)      // 强制重载映射
 	}
+}
+
+func extractPrefixParam(c *gin.Context) (string, error) {
+	prefix := strings.TrimSpace(c.Param("prefix"))
+	if prefix == "" {
+		return "", fmt.Errorf("prefix parameter is required")
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	return prefix, nil
+}
+
+func (h *Handler) setSessionCookie(c *gin.Context) {
+	value := url.QueryEscape(h.adminToken)
+	cookie := &http.Cookie{
+		Name:     adminSessionCookie,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   c.Request.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Now().Add(12 * time.Hour),
+		MaxAge:   int((12 * time.Hour).Seconds()),
+	}
+	http.SetCookie(c.Writer, cookie)
+}
+
+func (h *Handler) clearSessionCookie(c *gin.Context) {
+	cookie := &http.Cookie{
+		Name:     adminSessionCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   c.Request.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+	}
+	http.SetCookie(c.Writer, cookie)
+}
+
+func (h *Handler) getSessionToken(c *gin.Context) string {
+	value, err := c.Cookie(adminSessionCookie)
+	if err != nil {
+		return ""
+	}
+	decoded, err := url.QueryUnescape(value)
+	if err != nil {
+		return value
+	}
+	return decoded
 }
