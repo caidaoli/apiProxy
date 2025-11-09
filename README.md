@@ -32,12 +32,19 @@ cp .env.example .env
 # 4. 启动 Redis
 docker run -d -p 6379:6379 --name redis redis:7-alpine
 
-# 5. 启动服务
+# 5. 启动服务（支持空 Redis 启动）
 go run main.go
 # 默认监听 http://localhost:8000
+# ⚠️  服务会显示警告但正常启动，即使 Redis 中没有映射数据
 
-# 6. 通过管理界面添加 API 映射
-# 访问 http://localhost:8000/admin 添加映射配置
+# 6. 通过 API 添加第一个映射
+curl -X POST http://localhost:8000/api/mappings \
+  -H "Authorization: Bearer your_admin_token" \
+  -H "Content-Type: application/json" \
+  -d '{"prefix":"/api/v1","target":"https://api.example.com"}'
+
+# 7. 或通过 Web 管理界面添加映射
+# 访问 http://localhost:8000/admin
 ```
 
 ### Docker Compose 部署（推荐）
@@ -47,14 +54,36 @@ go run main.go
 cp .env.example .env
 # 编辑 .env 设置 REDIS_PASSWORD 和 ADMIN_TOKEN
 
-# 2. 启动所有服务
+# 2. 启动所有服务（自动创建 Redis 容器）
 docker-compose up -d
 
 # 3. 查看日志
 docker-compose logs -f api-proxy
 
-# 4. 通过管理界面添加 API 映射
-# 访问 http://localhost:8000/admin 添加映射配置
+# 4. 初始化映射（首次启动）
+curl -X POST http://localhost:8000/api/mappings \
+  -H "Authorization: Bearer your_admin_token" \
+  -H "Content-Type: application/json" \
+  -d '{"prefix":"/openai","target":"https://api.openai.com"}'
+
+# 5. 验证映射
+curl http://localhost:8000/api/public/mappings
+```
+
+### 使用远程 Redis Cloud
+
+```bash
+# 1. 启动服务（使用远程 Redis）
+docker compose -f docker-compose.test.yml up -d
+
+# 2. 添加映射（即使 Redis 为空也能启动）
+curl -X POST http://localhost:1111/api/mappings \
+  -H "Authorization: Bearer testofli" \
+  -H "Content-Type: application/json" \
+  -d '{"prefix":"/cerebras","target":"https://api.cerebras.ai"}'
+
+# 3. 查看所有映射
+curl http://localhost:1111/api/public/mappings
 ```
 
 ## 环境变量

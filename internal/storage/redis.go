@@ -177,9 +177,12 @@ func (m *MappingManager) reloadMappings(ctx context.Context) error {
 		return err
 	}
 
-	// 如果Redis为空,返回错误(需要先初始化)
+	// 如果Redis为空,记录警告但允许启动(可通过管理API动态添加)
 	if len(mappings) == 0 {
-		return errors.New("no mappings found in Redis, please run init script first")
+		log.Println("⚠️  No mappings found in Redis. Use /admin API to add mappings.")
+		log.Println("💡 Example: POST /admin/mappings with {\"prefix\":\"/api\",\"target\":\"https://api.example.com\"}")
+		m.lastReload.Store(time.Now().Unix())
+		return nil
 	}
 
 	// 双重检查（避免竞态条件）
