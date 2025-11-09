@@ -70,14 +70,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```go
 // ❌ 错误方式 - 读取整个文件
-Read("/Users/.../internal/proxy/handler.go")  // 300行代码全部读取,浪费token
+Read("internal/proxy/transparent.go")  // 直接读取全部代码,浪费token
 
 // ✅ 正确方式 - 使用符号概览
-mcp__serena__get_symbols_overview("internal/proxy/handler.go")
+mcp__serena__get_symbols_overview("internal/proxy/transparent.go")
 // 然后只读取需要的符号:
 mcp__serena__find_symbol(
-  name_path="(*Handler).HandleAPIProxy",
-  relative_path="internal/proxy/handler.go",
+  name_path="(*TransparentProxy).ProxyRequest",
+  relative_path="internal/proxy/transparent.go",
   include_body=true
 )
 ```
@@ -307,9 +307,10 @@ if err := stats.RecordRequest(prefix); err != nil {
 
 ## 关键文件说明
 
-- `internal/proxy/handler.go`: 核心异步代理逻辑(200-300行,包含流式转发)
-- `internal/storage/redis.go`: Redis映射管理(缓存机制)
-- `internal/stats/collector.go`: 统计收集器(原子操作+锁)
+- `internal/proxy/transparent.go`: 透明代理核心实现,流式转发
+- `internal/storage/redis.go`: Redis映射管理(缓存+RWMutex)
+- `internal/stats/collector.go`: 无锁统计收集器(channel+批处理)
+- `internal/admin/handler.go`: Web管理界面
 - `main.go`: 入口文件,路由设置,服务启动
 - `deployments/docker/`: Docker相关配置
 
