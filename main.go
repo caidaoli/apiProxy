@@ -97,12 +97,17 @@ func main() {
 	// 统计API路由
 	r.GET("/stats", func(c *gin.Context) {
 		stats := statsCollector.GetStats()
+		requests := statsCollector.GetRequests()
+		performance := statsCollector.GetPerformanceMetrics()
+
 		c.JSON(200, gin.H{
 			"total":          statsCollector.GetRequestCount(),
 			"errors":         statsCollector.GetErrorCount(),
 			"dropped_events": statsCollector.GetDroppedEvents(),
 			"avg_response":   statsCollector.GetAverageResponseTime().String(),
 			"endpoints":      stats,
+			"requests":       requests,    // 新增:时间序列数据
+			"performance":    performance, // 新增:性能指标
 		})
 	})
 
