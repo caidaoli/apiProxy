@@ -70,7 +70,8 @@ Connection, Keep-Alive, Proxy-Authenticate, Proxy-Authorization, TE, Trailer, Tr
    - HTTP连接池(MaxIdleConns=100, MaxConnsPerHost=200)
 
 2. **MappingManager** (internal/storage/)
-   - 本地缓存(5分钟TTL) + 后台自动重载
+   - 本地缓存(30秒TTL) + 后台自动重载(10秒周期)
+   - Redis Pub/Sub实时同步(多实例部署<100ms延迟)
    - 缓存命中率 >99%,避免频繁查询Redis
 
 3. **Collector** (internal/stats/)
@@ -202,3 +203,4 @@ if err := stats.RecordRequest(prefix); err != nil {
 3. **内存效率** - 避免缓存大对象,使用流式处理
 4. **错误处理** - 统计/日志失败不应影响代理转发
 5. **测试覆盖** - 新功能必须有单元测试,性能敏感代码需要基准测试
+6. **多实例同步** - 依赖Redis Pub/Sub,确保Redis连接稳定

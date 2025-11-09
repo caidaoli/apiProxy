@@ -22,6 +22,7 @@ const (
 	KeyMappings        = "apiproxy:mappings"
 	KeyVersion         = "apiproxy:version"
 	KeyMappingsVersion = "apiproxy:mappings:version" // 映射版本号
+	KeyMappingsChannel = "apiproxy:mappings:updates" // Pub/Sub通道
 
 	// 缓存配置
 	CacheTTL     = 30 * time.Second
@@ -32,7 +33,7 @@ const (
 type MappingManager struct {
 	client *redis.Client
 
-	// 使用 map + RWMutex 代替 sync.Map（读多写少场景更高效）
+	// 使用 map + RWMutex 代替 sync.Map(读多写少场景更高效)
 	mu    sync.RWMutex
 	cache map[string]string
 
@@ -44,6 +45,9 @@ type MappingManager struct {
 	// Goroutine控制
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+
+	// Pub/Sub订阅
+	pubsub *redis.PubSub
 }
 
 // parseRedisURL 解析Redis URL格式
@@ -143,9 +147,13 @@ func NewMappingManager(ctx context.Context) (*MappingManager, error) {
 
 	manager.initialized.Store(true)
 
-	// 启动后台重载协程
-	manager.wg.Add(1)
+	// 订阅Redis Pub/Sub通道
+	manager.pubsub = client.Subscribe(ctx, KeyMappingsChannel)
+
+	// 启动后台协程
+	manager.wg.Add(2)
 	go manager.backgroundReloader()
+	go manager.pubsubListener()
 
 	log.Printf("✅ MappingManager initialized: %d mappings loaded from Redis", manager.Count())
 
@@ -236,6 +244,36 @@ func (m *MappingManager) backgroundReloader() {
 	}
 }
 
+// pubsubListener 监听Redis Pub/Sub消息,实现多实例缓存同步
+func (m *MappingManager) pubsubListener() {
+	defer m.wg.Done()
+
+	ch := m.pubsub.Channel()
+
+	for {
+		select {
+		case <-m.stopChan:
+			log.Println("🛑 Pub/Sub listener stopped")
+			return
+		case msg := <-ch:
+			if msg == nil {
+				continue
+			}
+
+			log.Printf("📨 Received Pub/Sub message: %s", msg.Payload)
+
+			// 触发重载
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := m.reloadMappings(ctx); err != nil {
+				log.Printf("⚠️  Failed to reload after Pub/Sub notification: %v", err)
+			} else {
+				log.Printf("✅ Cache synchronized via Pub/Sub")
+			}
+			cancel()
+		}
+	}
+}
+
 // GetMapping 获取指定前缀的目标URL
 func (m *MappingManager) GetMapping(ctx context.Context, prefix string) (string, error) {
 	// 从缓存读取（读锁保护）
@@ -278,6 +316,43 @@ func (m *MappingManager) GetAllMappings() map[string]string {
 	return result
 }
 
+// ForceReload 强制从Redis重新加载映射,忽略版本号检查
+// 用于多实例部署时手动触发缓存同步
+func (m *MappingManager) ForceReload(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 从Redis获取所有映射
+	mappings, err := m.client.HGetAll(ctx, KeyMappings).Result()
+	if err != nil {
+		return err
+	}
+
+	// 创建新缓存
+	newCache := make(map[string]string, len(mappings))
+	for prefix, target := range mappings {
+		newCache[prefix] = target
+	}
+
+	// 替换缓存
+	m.cache = newCache
+
+	// 同步Redis版本号
+	remoteVersion, err := m.client.Get(ctx, KeyMappingsVersion).Int64()
+	if err != nil && err != redis.Nil {
+		log.Printf("⚠️  Failed to get remote version: %v", err)
+	}
+	if remoteVersion > 0 {
+		m.version.Store(remoteVersion)
+	}
+
+	m.lastReload.Store(time.Now().Unix())
+
+	log.Printf("🔄 Force reloaded %d mappings from Redis (version: %d)", len(mappings), m.version.Load())
+
+	return nil
+}
+
 // AddMapping 添加新的API映射
 func (m *MappingManager) AddMapping(ctx context.Context, prefix, target string) error {
 	// 验证输入
@@ -305,7 +380,7 @@ func (m *MappingManager) AddMapping(ctx context.Context, prefix, target string) 
 		log.Printf("⚠️  Failed to increment version: %v", err)
 	}
 
-	// 更新缓存和本地版本号（写锁保护）
+	// 更新缓存和本地版本号(写锁保护)
 	m.mu.Lock()
 	m.cache[prefix] = target
 	m.mu.Unlock()
@@ -314,6 +389,11 @@ func (m *MappingManager) AddMapping(ctx context.Context, prefix, target string) 
 		m.version.Store(newVersion)
 	} else {
 		m.version.Add(1)
+	}
+
+	// 发布Pub/Sub通知其他实例
+	if err := m.client.Publish(ctx, KeyMappingsChannel, "mapping_added").Err(); err != nil {
+		log.Printf("⚠️  Failed to publish Pub/Sub notification: %v", err)
 	}
 
 	log.Printf("[AUDIT] Added mapping: %s -> %s (version: %d)", prefix, target, m.version.Load())
@@ -348,7 +428,7 @@ func (m *MappingManager) UpdateMapping(ctx context.Context, prefix, target strin
 		log.Printf("⚠️  Failed to increment version: %v", err)
 	}
 
-	// 更新缓存和本地版本号（写锁保护）
+	// 更新缓存和本地版本号(写锁保护)
 	m.mu.Lock()
 	m.cache[prefix] = target
 	m.mu.Unlock()
@@ -357,6 +437,11 @@ func (m *MappingManager) UpdateMapping(ctx context.Context, prefix, target strin
 		m.version.Store(newVersion)
 	} else {
 		m.version.Add(1)
+	}
+
+	// 发布Pub/Sub通知其他实例
+	if err := m.client.Publish(ctx, KeyMappingsChannel, "mapping_updated").Err(); err != nil {
+		log.Printf("⚠️  Failed to publish Pub/Sub notification: %v", err)
 	}
 
 	log.Printf("[AUDIT] Updated mapping: %s -> %s (version: %d)", prefix, target, m.version.Load())
@@ -386,7 +471,7 @@ func (m *MappingManager) DeleteMapping(ctx context.Context, prefix string) error
 		log.Printf("⚠️  Failed to increment version: %v", err)
 	}
 
-	// 从缓存删除并更新本地版本号（写锁保护）
+	// 从缓存删除并更新本地版本号(写锁保护)
 	m.mu.Lock()
 	delete(m.cache, prefix)
 	m.mu.Unlock()
@@ -395,6 +480,11 @@ func (m *MappingManager) DeleteMapping(ctx context.Context, prefix string) error
 		m.version.Store(newVersion)
 	} else {
 		m.version.Add(1)
+	}
+
+	// 发布Pub/Sub通知其他实例
+	if err := m.client.Publish(ctx, KeyMappingsChannel, "mapping_deleted").Err(); err != nil {
+		log.Printf("⚠️  Failed to publish Pub/Sub notification: %v", err)
 	}
 
 	log.Printf("[AUDIT] Deleted mapping: %s (version: %d)", prefix, m.version.Load())
@@ -444,6 +534,13 @@ func (m *MappingManager) Close() error {
 
 	// 等待后台goroutine退出
 	m.wg.Wait()
+
+	// 关闭Pub/Sub订阅
+	if m.pubsub != nil {
+		if err := m.pubsub.Close(); err != nil {
+			log.Printf("⚠️  Failed to close Pub/Sub: %v", err)
+		}
+	}
 
 	// 关闭Redis连接
 	if m.client != nil {

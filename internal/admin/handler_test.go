@@ -47,6 +47,11 @@ func (m *MockMappingManager) DeleteMapping(ctx context.Context, prefix string) e
 	return nil
 }
 
+func (m *MockMappingManager) ForceReload(ctx context.Context) error {
+	// Mock实现:不需要实际重载
+	return nil
+}
+
 func (m *MockMappingManager) Count() int {
 	return len(m.mappings)
 }

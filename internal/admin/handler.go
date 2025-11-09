@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -16,6 +17,7 @@ type MappingManager interface {
 	AddMapping(ctx context.Context, prefix, target string) error
 	UpdateMapping(ctx context.Context, prefix, target string) error
 	DeleteMapping(ctx context.Context, prefix string) error
+	ForceReload(ctx context.Context) error
 	Count() int
 	GetPrefixes() []string
 	IsInitialized() bool
@@ -188,6 +190,24 @@ func (h *Handler) handleDeleteMapping(c *gin.Context) {
 	})
 }
 
+// handleForceReload 强制重新加载映射(用于多实例同步)
+// handleForceReload 强制重新加载映射(用于多实例同步)
+func (h *Handler) handleForceReload(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	if err := h.mapper.ForceReload(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to reload mappings: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Mappings reloaded successfully",
+		"version": h.mapper.GetVersion(),
+	})
+}
+
 // handleAdminPage 管理页面
 func (h *Handler) handleAdminPage(c *gin.Context) {
 	c.File("web/templates/admin.html")
@@ -245,5 +265,6 @@ func (h *Handler) SetupRoutes(r *gin.Engine) {
 		adminAPI.POST("", h.handleAddMapping)              // 添加映射
 		adminAPI.PUT("/:prefix", h.handleUpdateMapping)    // 更新映射
 		adminAPI.DELETE("/:prefix", h.handleDeleteMapping) // 删除映射
+		adminAPI.POST("/reload", h.handleForceReload)      // 强制重载映射
 	}
 }

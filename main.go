@@ -115,22 +115,36 @@ func main() {
 	adminHandler := admin.NewHandler(mappingManager)
 	adminHandler.SetupRoutes(r)
 
-	// API代理路由 - 使用透明代理转发
-	prefixes := mappingManager.GetPrefixes()
-	for _, prefix := range prefixes {
-		// 创建局部变量避免闭包陷阱
-		currentPrefix := prefix
-		r.Any(prefix+"/*path", func(c *gin.Context) {
-			// 只提取path参数，prefix已经在闭包中
-			path := c.Param("path")
+	// API代理路由 - 使用通配符动态匹配所有路径
+	// 注意: 必须放在最后,避免覆盖其他路由
+	r.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
 
-			// 使用透明代理转发
-			if err := transparentProxy.ProxyRequest(c.Writer, c.Request, currentPrefix, path); err != nil {
-				log.Printf("Proxy error: %v", err)
-				c.JSON(500, gin.H{"error": err.Error()})
+		// 查找匹配的prefix
+		prefixes := mappingManager.GetPrefixes()
+		for _, prefix := range prefixes {
+			if len(path) >= len(prefix) && path[:len(prefix)] == prefix {
+				// 提取剩余路径
+				remainingPath := path[len(prefix):]
+
+				// 使用透明代理转发
+				if err := transparentProxy.ProxyRequest(c.Writer, c.Request, prefix, remainingPath); err != nil {
+					log.Printf("Proxy error for %s: %v", path, err)
+					c.JSON(500, gin.H{"error": err.Error()})
+					return
+				}
+				return
 			}
+		}
+
+		// 没有匹配的映射
+		c.JSON(404, gin.H{
+			"error":   "No mapping found for this path",
+			"path":    path,
+			"hint":    "Use POST /api/mappings to add a mapping",
+			"example": map[string]string{"prefix": "/api", "target": "https://api.example.com"},
 		})
-	}
+	})
 
 	// 启动服务器
 	port := os.Getenv("PORT")
