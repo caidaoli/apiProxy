@@ -54,19 +54,21 @@ func createOptimizedHTTPClient() *http.Client {
 	return &http.Client{
 		// 不设置总超时，由客户端控制（完全透明代理）
 		Transport: &http.Transport{
-			// 连接池配置
-			MaxIdleConns:        1000, // 全局最大空闲连接数
-			MaxIdleConnsPerHost: 100,  // 每个后端最大空闲连接数
-			MaxConnsPerHost:     200,  // 每个后端最大连接数（防止连接泄漏）
+			// 连接池配置（从保守值开始，可根据压测调整）
+			MaxIdleConns:        100, // 全局最大空闲连接数
+			MaxIdleConnsPerHost: 10,  // 每个后端最大空闲连接数
+			MaxConnsPerHost:     100, // 每个后端最大连接数（防止连接泄漏）
 
-			// 超时配置（防止连接泄漏，但不影响请求本身）
+			// 超时配置（防止资源泄漏，但不影响请求本身）
 			IdleConnTimeout:       90 * time.Second, // 空闲连接90秒后关闭
 			TLSHandshakeTimeout:   10 * time.Second, // TLS握手超时
 			ExpectContinueTimeout: 1 * time.Second,  // 100-continue超时
 
 			// 透明代理特性
-			DisableCompression: true, // 不解压/压缩，保持原样
-			DisableKeepAlives:  false,
+			// DisableCompression: false (默认值，不显式设置)
+			// 让客户端和服务端自己协商压缩，代理完全透明传输
+			// 无论内容是否压缩，都原样转发
+			DisableKeepAlives: false,
 
 			// 不设置ResponseHeaderTimeout - 由客户端控制
 		},
@@ -88,28 +90,38 @@ func (p *TransparentProxy) ProxyRequest(w http.ResponseWriter, r *http.Request, 
 		targetURL += "?" + r.URL.RawQuery
 	}
 
-	// 2. 创建代理请求（直接传递Body，流式处理）
+	// 2. 添加超时保护（防止goroutine泄漏，同时尊重客户端的timeout）
+	ctx := r.Context()
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		// 客户端没有设置deadline，添加保护性超时（1小时）
+		// 这不违反透明代理原则，因为这是资源保护而非业务超时
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 1*time.Hour)
+		defer cancel()
+	}
+
+	// 3. 创建代理请求（直接传递Body，流式处理）
 	// 关键优化：不读取Body到内存，直接传递给后端
-	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
+	proxyReq, err := http.NewRequestWithContext(ctx, r.Method, targetURL, r.Body)
 	if err != nil {
 		return err
 	}
 
-	// 3. 复制请求头（过滤hop-by-hop头部）
+	// 4. 复制请求头（过滤hop-by-hop头部）
 	copyHeaders(proxyReq.Header, r.Header)
 
-	// 4. 发送请求到后端
+	// 5. 发送请求到后端
 	resp, err := p.client.Do(proxyReq)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	// 5. 复制响应头（过滤hop-by-hop头部）
+	// 6. 复制响应头（过滤hop-by-hop头部）
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 
-	// 6. 流式复制响应体
+	// 7. 流式复制响应体
 	// 使用io.Copy，内部使用32KB缓冲区，内存使用恒定
 	_, err = io.Copy(w, resp.Body)
 	return err
@@ -125,11 +137,4 @@ func copyHeaders(dst, src http.Header) {
 			dst[name] = values
 		}
 	}
-}
-
-// ProxyRequestWithContext 带context的代理请求（支持取消）
-func (p *TransparentProxy) ProxyRequestWithContext(ctx context.Context, w http.ResponseWriter, r *http.Request, prefix, rest string) error {
-	// 使用传入的context替换请求的context
-	r = r.WithContext(ctx)
-	return p.ProxyRequest(w, r, prefix, rest)
 }
