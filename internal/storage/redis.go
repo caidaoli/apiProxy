@@ -19,8 +19,9 @@ import (
 
 const (
 	// Redis键名
-	KeyMappings = "apiproxy:mappings"
-	KeyVersion  = "apiproxy:version"
+	KeyMappings        = "apiproxy:mappings"
+	KeyVersion         = "apiproxy:version"
+	KeyMappingsVersion = "apiproxy:mappings:version" // 映射版本号
 
 	// 缓存配置
 	CacheTTL     = 30 * time.Second
@@ -29,12 +30,20 @@ const (
 
 // MappingManager 管理API映射的核心结构
 type MappingManager struct {
-	client      *redis.Client
-	cache       sync.Map // prefix -> target URL 的本地缓存
+	client *redis.Client
+
+	// 使用 map + RWMutex 代替 sync.Map（读多写少场景更高效）
+	mu    sync.RWMutex
+	cache map[string]string
+
+	// 使用原子操作保护的字段
 	version     atomic.Int64
-	lastReload  time.Time
-	mu          sync.RWMutex
+	lastReload  atomic.Int64 // Unix时间戳
 	initialized atomic.Bool
+
+	// Goroutine控制
+	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // parseRedisURL 解析Redis URL格式
@@ -121,9 +130,11 @@ func NewMappingManager(ctx context.Context) (*MappingManager, error) {
 	}
 
 	manager := &MappingManager{
-		client:     client,
-		lastReload: time.Now(),
+		client:   client,
+		cache:    make(map[string]string),
+		stopChan: make(chan struct{}),
 	}
+	manager.lastReload.Store(time.Now().Unix())
 
 	// 首次加载映射
 	if err := manager.reloadMappings(ctx); err != nil {
@@ -133,6 +144,7 @@ func NewMappingManager(ctx context.Context) (*MappingManager, error) {
 	manager.initialized.Store(true)
 
 	// 启动后台重载协程
+	manager.wg.Add(1)
 	go manager.backgroundReloader()
 
 	log.Printf("✅ MappingManager initialized: %d mappings loaded from Redis", manager.Count())
@@ -142,6 +154,20 @@ func NewMappingManager(ctx context.Context) (*MappingManager, error) {
 
 // reloadMappings 从Redis重新加载所有映射到缓存
 func (m *MappingManager) reloadMappings(ctx context.Context) error {
+	// 先检查Redis版本号（不需要锁，快速检查）
+	remoteVersion, err := m.client.Get(ctx, KeyMappingsVersion).Int64()
+	if err != nil && err != redis.Nil {
+		return err
+	}
+
+	// 如果版本号没变，直接返回（避免不必要的加载）
+	currentVersion := m.version.Load()
+	if remoteVersion > 0 && remoteVersion == currentVersion {
+		m.lastReload.Store(time.Now().Unix())
+		return nil
+	}
+
+	// 版本号变了，获取锁并重载
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -156,47 +182,29 @@ func (m *MappingManager) reloadMappings(ctx context.Context) error {
 		return errors.New("no mappings found in Redis, please run init script first")
 	}
 
-	// 检查是否有变化
-	hasChanges := false
-	currentCount := 0
-	m.cache.Range(func(key, value interface{}) bool {
-		currentCount++
-		prefix := key.(string)
-		currentTarget := value.(string)
-
-		// 检查是否被删除或修改
-		if newTarget, exists := mappings[prefix]; !exists || newTarget != currentTarget {
-			hasChanges = true
-			return false // 提前退出
-		}
-		return true
-	})
-
-	// 检查是否有新增
-	if !hasChanges && len(mappings) != currentCount {
-		hasChanges = true
-	}
-
-	// 如果没有变化，跳过更新
-	if !hasChanges {
-		m.lastReload = time.Now()
+	// 双重检查（避免竞态条件）
+	if remoteVersion > 0 && remoteVersion == m.version.Load() {
 		return nil
 	}
 
-	// 清空旧缓存
-	m.cache.Range(func(key, value interface{}) bool {
-		m.cache.Delete(key)
-		return true
-	})
-
-	// 加载新映射到缓存
+	// 创建新缓存（避免在持锁期间逐个删除）
+	newCache := make(map[string]string, len(mappings))
 	for prefix, target := range mappings {
-		m.cache.Store(prefix, target)
+		newCache[prefix] = target
 	}
 
-	// 只有在有变化时才更新版本号
-	m.version.Add(1)
-	m.lastReload = time.Now()
+	// 一次性替换缓存
+	m.cache = newCache
+
+	// 更新版本号
+	if remoteVersion > 0 {
+		m.version.Store(remoteVersion)
+	} else {
+		// 如果Redis中没有版本号，使用本地版本号并写入Redis
+		m.version.Add(1)
+		m.client.Set(ctx, KeyMappingsVersion, m.version.Load(), 0)
+	}
+	m.lastReload.Store(time.Now().Unix())
 
 	log.Printf("📦 Reloaded %d mappings from Redis (version: %d)", len(mappings), m.version.Load())
 
@@ -205,23 +213,35 @@ func (m *MappingManager) reloadMappings(ctx context.Context) error {
 
 // backgroundReloader 后台定期重载映射
 func (m *MappingManager) backgroundReloader() {
+	defer m.wg.Done()
+
 	ticker := time.NewTicker(ReloadPeriod)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := m.reloadMappings(ctx); err != nil {
-			log.Printf("⚠️  Background reload failed: %v", err)
+	for {
+		select {
+		case <-m.stopChan:
+			log.Println("🛑 Background reloader stopped")
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := m.reloadMappings(ctx); err != nil {
+				log.Printf("⚠️  Background reload failed: %v", err)
+			}
+			cancel()
 		}
-		cancel()
 	}
 }
 
 // GetMapping 获取指定前缀的目标URL
 func (m *MappingManager) GetMapping(ctx context.Context, prefix string) (string, error) {
-	// 从缓存读取
-	if target, ok := m.cache.Load(prefix); ok {
-		return target.(string), nil
+	// 从缓存读取（读锁保护）
+	m.mu.RLock()
+	target, ok := m.cache[prefix]
+	m.mu.RUnlock()
+
+	if ok {
+		return target, nil
 	}
 
 	// 缓存未命中,从Redis读取
@@ -233,20 +253,24 @@ func (m *MappingManager) GetMapping(ctx context.Context, prefix string) (string,
 		return "", err
 	}
 
-	// 更新缓存
-	m.cache.Store(prefix, target)
+	// 更新缓存（写锁保护）
+	m.mu.Lock()
+	m.cache[prefix] = target
+	m.mu.Unlock()
 
 	return target, nil
 }
 
 // GetAllMappings 获取所有映射
 func (m *MappingManager) GetAllMappings() map[string]string {
-	result := make(map[string]string)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	m.cache.Range(func(key, value interface{}) bool {
-		result[key.(string)] = value.(string)
-		return true
-	})
+	// 复制map避免外部修改
+	result := make(map[string]string, len(m.cache))
+	for k, v := range m.cache {
+		result[k] = v
+	}
 
 	return result
 }
@@ -272,11 +296,24 @@ func (m *MappingManager) AddMapping(ctx context.Context, prefix, target string) 
 		return err
 	}
 
-	// 更新缓存
-	m.cache.Store(prefix, target)
-	m.version.Add(1)
+	// 增加Redis版本号
+	newVersion, err := m.client.Incr(ctx, KeyMappingsVersion).Result()
+	if err != nil {
+		log.Printf("⚠️  Failed to increment version: %v", err)
+	}
 
-	log.Printf("[AUDIT] Added mapping: %s -> %s", prefix, target)
+	// 更新缓存和本地版本号（写锁保护）
+	m.mu.Lock()
+	m.cache[prefix] = target
+	m.mu.Unlock()
+
+	if newVersion > 0 {
+		m.version.Store(newVersion)
+	} else {
+		m.version.Add(1)
+	}
+
+	log.Printf("[AUDIT] Added mapping: %s -> %s (version: %d)", prefix, target, m.version.Load())
 
 	return nil
 }
@@ -302,11 +339,24 @@ func (m *MappingManager) UpdateMapping(ctx context.Context, prefix, target strin
 		return err
 	}
 
-	// 更新缓存
-	m.cache.Store(prefix, target)
-	m.version.Add(1)
+	// 增加Redis版本号
+	newVersion, err := m.client.Incr(ctx, KeyMappingsVersion).Result()
+	if err != nil {
+		log.Printf("⚠️  Failed to increment version: %v", err)
+	}
 
-	log.Printf("[AUDIT] Updated mapping: %s -> %s", prefix, target)
+	// 更新缓存和本地版本号（写锁保护）
+	m.mu.Lock()
+	m.cache[prefix] = target
+	m.mu.Unlock()
+
+	if newVersion > 0 {
+		m.version.Store(newVersion)
+	} else {
+		m.version.Add(1)
+	}
+
+	log.Printf("[AUDIT] Updated mapping: %s -> %s (version: %d)", prefix, target, m.version.Load())
 
 	return nil
 }
@@ -327,33 +377,44 @@ func (m *MappingManager) DeleteMapping(ctx context.Context, prefix string) error
 		return err
 	}
 
-	// 从缓存删除
-	m.cache.Delete(prefix)
-	m.version.Add(1)
+	// 增加Redis版本号
+	newVersion, err := m.client.Incr(ctx, KeyMappingsVersion).Result()
+	if err != nil {
+		log.Printf("⚠️  Failed to increment version: %v", err)
+	}
 
-	log.Printf("[AUDIT] Deleted mapping: %s", prefix)
+	// 从缓存删除并更新本地版本号（写锁保护）
+	m.mu.Lock()
+	delete(m.cache, prefix)
+	m.mu.Unlock()
+
+	if newVersion > 0 {
+		m.version.Store(newVersion)
+	} else {
+		m.version.Add(1)
+	}
+
+	log.Printf("[AUDIT] Deleted mapping: %s (version: %d)", prefix, m.version.Load())
 
 	return nil
 }
 
 // Count 返回映射数量
 func (m *MappingManager) Count() int {
-	count := 0
-	m.cache.Range(func(key, value interface{}) bool {
-		count++
-		return true
-	})
-	return count
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.cache)
 }
 
 // GetPrefixes 获取所有前缀列表
 func (m *MappingManager) GetPrefixes() []string {
-	var prefixes []string
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	m.cache.Range(func(key, value interface{}) bool {
-		prefixes = append(prefixes, key.(string))
-		return true
-	})
+	prefixes := make([]string, 0, len(m.cache))
+	for prefix := range m.cache {
+		prefixes = append(prefixes, prefix)
+	}
 
 	return prefixes
 }
@@ -373,8 +434,15 @@ func (m *MappingManager) GetClient() *redis.Client {
 	return m.client
 }
 
-// Close 关闭Redis连接
+// Close 关闭Redis连接并停止后台goroutine
 func (m *MappingManager) Close() error {
+	// 通知后台goroutine停止
+	close(m.stopChan)
+
+	// 等待后台goroutine退出
+	m.wg.Wait()
+
+	// 关闭Redis连接
 	if m.client != nil {
 		return m.client.Close()
 	}

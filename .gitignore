@@ -101,8 +101,8 @@ dist
 .tern-port
 
 # Go build output
-api-proxy
-apiProxy
+api-proxy*
+apiProxy*
 *.exe
 *.dll
 *.so

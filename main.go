@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"api-proxy/internal/admin"
+	"api-proxy/internal/middleware"
 	"api-proxy/internal/proxy"
 	"api-proxy/internal/stats"
 	"api-proxy/internal/storage"
@@ -22,7 +23,6 @@ import (
 
 func main() {
 	// 加载 .env 文件
-	// 优先加载根目录的.env，如果不存在则尝试deployments/config/.env.example
 	if err := godotenv.Load(); err != nil {
 		if err := godotenv.Load("deployments/config/.env.example"); err != nil {
 			log.Println("⚠️  未找到 .env 文件,将使用系统环境变量")
@@ -48,17 +48,12 @@ func main() {
 	}
 	defer mappingManager.Close()
 
-	// 初始化统计系统（复用Redis连接）
+	// 创建优化后的统计收集器（V2架构）
 	statsCollector := stats.NewCollector(mappingManager.GetClient())
+	defer statsCollector.Close()
 
-	// 创建代理处理器
-	proxyHandler := proxy.NewHandler(
-		mappingManager,
-		statsCollector,
-		statsCollector,
-		statsCollector.GetErrorCount(),
-		statsCollector.GetRequestCount(),
-	)
+	// 创建透明代理（V2架构）
+	transparentProxy := proxy.NewTransparentProxy(mappingManager)
 
 	// 创建路由
 	r := gin.New()
@@ -82,6 +77,12 @@ func main() {
 	// 添加恢复中间件
 	r.Use(gin.Recovery())
 
+	// 可选：添加统计中间件
+	if os.Getenv("ENABLE_STATS") != "false" {
+		statsMiddleware := middleware.NewStatsMiddleware(statsCollector)
+		r.Use(statsMiddleware.Handler())
+	}
+
 	// 基础路由
 	r.GET("/", handleIndex)
 	r.GET("/index.html", handleIndex)
@@ -93,16 +94,36 @@ func main() {
 	// 静态文件服务
 	r.Static("/static", "./web/static")
 
-	// 统计API路由
-	r.GET("/stats", statsCollector.HandleStats)
+	// 统计API路由（使用V2收集器）
+	r.GET("/stats", func(c *gin.Context) {
+		stats := statsCollector.GetStats()
+		c.JSON(200, gin.H{
+			"total":          statsCollector.GetRequestCount(),
+			"errors":         statsCollector.GetErrorCount(),
+			"dropped_events": statsCollector.GetDroppedEvents(),
+			"avg_response":   statsCollector.GetAverageResponseTime().String(),
+			"endpoints":      stats,
+		})
+	})
 
 	// 管理路由
 	admin.SetupRoutes(r, mappingManager)
 
-	// API代理路由 - 动态注册所有映射
+	// API代理路由 - 使用TransparentProxy（V2架构）
 	prefixes := mappingManager.GetPrefixes()
 	for _, prefix := range prefixes {
-		r.Any(prefix+"/*path", proxyHandler.HandleAPIProxy)
+		// 创建局部变量避免闭包陷阱
+		currentPrefix := prefix
+		r.Any(prefix+"/*path", func(c *gin.Context) {
+			// 只提取path参数，prefix已经在闭包中
+			path := c.Param("path")
+
+			// 使用透明代理转发（V2架构）
+			if err := transparentProxy.ProxyRequest(c.Writer, c.Request, currentPrefix, path); err != nil {
+				log.Printf("Proxy error: %v", err)
+				c.JSON(500, gin.H{"error": err.Error()})
+			}
+		})
 	}
 
 	// 启动服务器
@@ -111,12 +132,14 @@ func main() {
 		port = "8000"
 	}
 
-	log.Printf("🚀 API代理服务器已启动 (Go优化版) 端口:%s", port)
-	log.Printf("🕒 统计数据每分钟自动刷新页面")
-	log.Printf("⚡ 性能优化：异步统计、内存优化、锁竞争减少")
-	log.Printf("⏱️  超时配置：AI API 30分钟，其他API 1分钟，HTTP客户端 30分钟")
+	log.Printf("🚀 API代理服务器已启动 (V2优化架构) 端口:%s", port)
+	log.Printf("⚡ V2特性: 透明代理 + 无锁统计 + 流式处理")
 	log.Printf("📊 访问 http://localhost:%s 查看统计信息", port)
 	log.Printf("🔧 访问 http://localhost:%s/admin 管理API映射", port)
+
+	if os.Getenv("ENABLE_STATS") != "false" {
+		log.Printf("📈 统计功能: 已启用 (可通过 ENABLE_STATS=false 禁用)")
+	}
 
 	// 使用自定义HTTP服务器
 	srv := &http.Server{
@@ -138,13 +161,13 @@ func main() {
 
 	log.Println("正在关闭服务器...")
 
-	// 保存统计数据到Redis
+	// 保存统计数据到Redis（可选）
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer saveCancel() // ✅ 修复: 确保context资源释放,即使发生panic
+	defer saveCancel()
 	if err := statsCollector.SaveToRedis(saveCtx); err != nil {
 		log.Printf("❌ 关闭时保存统计数据失败: %v", err)
 	} else {
-		log.Println("💾 统计数据已保存到Redis")
+		log.Println("📊 统计数据已保存到Redis")
 	}
 
 	// 优雅关闭HTTP服务器
