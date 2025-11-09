@@ -74,6 +74,24 @@ func handleGetAllMappings(c *gin.Context) {
 	})
 }
 
+// handleGetPublicMappings 返回所有映射(公开访问,只读)
+// 用于前端页面动态加载端点列表
+func handleGetPublicMappings(c *gin.Context) {
+	mappings := mappingManager.GetAllMappings()
+
+	// 转换为前端需要的格式: {"/prefix": "https://target"}
+	publicMappings := make(map[string]string)
+	for prefix, target := range mappings {
+		publicMappings[prefix] = target
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"count":    len(publicMappings),
+		"mappings": publicMappings,
+	})
+}
+
 // MappingRequest 映射请求体
 type MappingRequest struct {
 	Prefix string `json:"prefix" binding:"required"`
@@ -213,6 +231,9 @@ func SetupRoutes(r *gin.Engine, mm MappingManager) {
 
 	// 登录验证接口
 	r.POST("/api/admin/login", handleAdminLogin)
+
+	// 公开只读映射API (无需认证,用于前端页面)
+	r.GET("/api/public/mappings", handleGetPublicMappings)
 
 	// 管理API (需要Token认证)
 	adminAPI := r.Group("/api/mappings")

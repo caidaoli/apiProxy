@@ -87,19 +87,19 @@ func TestTransparentRequestHeaderForwarding(t *testing.T) {
 
 	// 设置各种请求头
 	testHeaders := map[string]string{
-		"User-Agent":       "TestAgent/1.0",
-		"Cookie":           "session=abc123",
-		"Origin":           "https://example.com",
-		"Referer":          "https://example.com/page",
-		"Accept-Encoding":  "gzip, deflate, br",
-		"Accept-Language":  "zh-CN,zh;q=0.9,en;q=0.8",
-		"Cache-Control":    "no-cache",
-		"If-None-Match":    "\"abc123\"",
+		"User-Agent":        "TestAgent/1.0",
+		"Cookie":            "session=abc123",
+		"Origin":            "https://example.com",
+		"Referer":           "https://example.com/page",
+		"Accept-Encoding":   "gzip, deflate, br",
+		"Accept-Language":   "zh-CN,zh;q=0.9,en;q=0.8",
+		"Cache-Control":     "no-cache",
+		"If-None-Match":     "\"abc123\"",
 		"If-Modified-Since": "Mon, 01 Jan 2024 00:00:00 GMT",
-		"Range":            "bytes=0-1023",
-		"X-Custom-Header":  "custom-value",
-		"Authorization":    "Bearer token123",
-		"Content-Type":     "application/json",
+		"Range":             "bytes=0-1023",
+		"X-Custom-Header":   "custom-value",
+		"Authorization":     "Bearer token123",
+		"Content-Type":      "application/json",
 	}
 
 	req := httptest.NewRequest("GET", "/test/api/endpoint", nil)

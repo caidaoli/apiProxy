@@ -179,15 +179,23 @@ func (h *Handler) HandleAPIProxy(c *gin.Context) {
 		return
 	}
 
+	// 在goroutine中处理代理请求
+	errChan := make(chan error, 1)
 	go func() {
-		defer asyncCtx.cancel()
-		if err := h.handleAsyncAPIRequest(asyncCtx, c, prefix, rest); err != nil {
+		errChan <- h.handleAsyncAPIRequest(asyncCtx, c, prefix, rest)
+	}()
+
+	// 等待请求完成或context取消
+	select {
+	case err := <-errChan:
+		if err != nil && err != context.Canceled {
 			log.Printf("Async API request error: %v", err)
 			atomic.AddInt64(h.errorCount, 1)
 		}
-	}()
+	case <-asyncCtx.ctx.Done():
+		// 客户端主动断开连接
+	}
 
-	<-asyncCtx.ctx.Done()
 	h.updateResponseMetrics(asyncCtx.startTime)
 }
 

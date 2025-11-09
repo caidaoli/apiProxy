@@ -29,11 +29,6 @@
     </nav>
 
     <div class="container">
-        <div class="header">
-            <h1>🚀 API代理服务器<span class="go-badge">Go版本</span><span class="performance-badge">性能优化</span></h1>
-            <p id="performance-info">正在加载性能数据...</p>
-        </div>
-        
         <div class="chart-section">
             <div class="chart-header">
                 <h2 class="chart-title">📊 API调用统计图表</h2>
@@ -117,22 +112,6 @@ https://api.anthropic.com/v1/messages
             </div>
             
             <div class="example-section">
-                <h3>⚡ Go版本特性</h3>
-                <ul style="margin-left: 20px; color: #666; line-height: 1.6;">
-                    <li>🚀 <strong>高并发性能</strong>：支持数万并发连接</li>
-                    <li>⚡ <strong>低延迟</strong>：平均响应时间 < 50ms</li>
-                    <li>💾 <strong>内存优化</strong>：使用原子操作和读写锁</li>
-                    <li>🔄 <strong>连接池</strong>：HTTP连接复用和Keep-Alive</li>
-                    <li>📊 <strong>智能缓存</strong>：统计数据3秒缓存机制</li>
-                    <li>🛡️ <strong>异步处理</strong>：统计记录异步化避免阻塞</li>
-                    <li>🧹 <strong>自动清理</strong>：定期清理过期数据释放内存</li>
-                    <li>✅ 支持所有HTTP方法和CORS跨域请求</li>
-                    <li>✅ 实时性能监控和错误率统计</li>
-                    <li>✅ 完全透明代理,不修改请求和响应内容</li>
-                </ul>
-            </div>
-            
-            <div class="example-section">
                 <h3>⚡ 透明代理特性</h3>
                 <ul style="margin-left: 20px; color: #666; line-height: 1.6;">
                     <li>✅ 支持所有HTTP方法 (GET, POST, PUT, DELETE等)</li>
@@ -145,22 +124,9 @@ https://api.anthropic.com/v1/messages
                 </ul>
             </div>
             
-            <div class="example-section">
-                <h3>📊 统计功能</h3>
-                <ul style="margin-left: 20px; color: #666; line-height: 1.6;">
-                    <li>📈 实时统计API调用次数</li>
-                    <li>📈 支持多时间维度统计（24h/7d/30d/总计）</li>
-                    <li>📈 重点监控OpenAI、Gemini、Claude和XAI API使用量</li>
-                    <li>📈 提供JSON格式统计API: <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;" id="stats-api-url">loading...</code></li>
-                    <li>📈 组合图表展示，柱状图+折线图显示数据和趋势</li>
-                </ul>
-            </div>
+          
             
-            <div class="example-section">
-                <h3>📊 统计API</h3>
-                <p style="margin-bottom: 16px; color: #666;">提供JSON格式的统计数据：</p>
-                <div class="code-block">GET <span id="stats-example-domain">loading...</span>/stats</div>
-            </div>
+        
         </div>
     </div>
     <button class="refresh-btn" onclick="refreshData()">🔄 刷新数据</button>
@@ -173,35 +139,34 @@ https://api.anthropic.com/v1/messages
         let currentPeriod = 'today';
         let currentEndpoint = 'all';
         let currentDomain = '';
+        let apiMapping = {}; // 动态加载的API映射
         const barColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#64748b', '#14b8a6', '#a855f7', '#eab308', '#22c55e', '#3b82f6'];
-
-        // API映射
-        const apiMapping = {
-            "/discord": "https://discord.com/api",
-            "/telegram": "https://api.telegram.org",
-            "/openai": "https://api.openai.com",
-            "/claude": "https://api.anthropic.com",
-            "/gemini": "https://generativelanguage.googleapis.com",
-            "/gnothink": "https://generativelanguage.googleapis.com",
-            "/meta": "https://www.meta.ai/api",
-            "/groq": "https://api.groq.com/openai",
-            "/xai": "https://api.x.ai",
-            "/cohere": "https://api.cohere.ai",
-            "/huggingface": "https://api-inference.huggingface.co",
-            "/together": "https://api.together.xyz",
-            "/novita": "https://api.novita.ai",
-            "/portkey": "https://api.portkey.ai",
-            "/fireworks": "https://api.fireworks.ai",
-            "/openrouter": "https://openrouter.ai/api",
-            "/sophnet": "https://sophnet.com/",
-            "/cerebras": "https://api.cerebras.ai"
-        };
 
         // 获取当前域名
         function getCurrentDomain() {
             const protocol = window.location.protocol;
             const host = window.location.host;
             return `${protocol}//${host}`;
+        }
+
+        // 加载API映射配置
+        async function loadAPIMappings() {
+            try {
+                const response = await fetch('/api/public/mappings');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.success && data.mappings) {
+                    apiMapping = data.mappings;
+                    console.log('✅ 已从服务器加载', data.count, '个API映射');
+                } else {
+                    console.warn('⚠️ 未能加载API映射数据');
+                }
+            } catch (error) {
+                console.error('加载API映射失败:', error);
+                showToast('加载API映射失败,请刷新页面重试');
+            }
         }
 
         // 加载统计数据
@@ -291,20 +256,32 @@ https://api.anthropic.com/v1/messages
             let endpointListHTML = '';
 
             // 获取有数据的端点并按调用次数排序，取前8个
-            if (rawStatsData && rawStatsData.endpoints) {
+            if (rawStatsData && rawStatsData.endpoints && Object.keys(rawStatsData.endpoints).length > 0) {
                 const activeEndpoints = Object.keys(rawStatsData.endpoints)
                     .filter(ep => rawStatsData.endpoints[ep].total > 0)
                     .sort((a, b) => rawStatsData.endpoints[b].total - rawStatsData.endpoints[a].total)
                     .slice(0, 8);
 
-                activeEndpoints.forEach(endpoint => {
-                    endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
-                        <div class="endpoint-path">${endpoint}</div>
-                        <div class="endpoint-url">${currentDomain}${endpoint}</div>
-                    </div>`;
-                });
+                // 如果有活跃端点，显示活跃端点；否则显示所有映射的端点
+                if (activeEndpoints.length > 0) {
+                    activeEndpoints.forEach(endpoint => {
+                        endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
+                            <div class="endpoint-path">${endpoint}</div>
+                            <div class="endpoint-url">${currentDomain}${endpoint}</div>
+                        </div>`;
+                    });
+                } else {
+                    // 有统计数据但没有活跃端点，显示所有映射的端点
+                    const endpoints = Object.keys(apiMapping).slice(0, 8);
+                    endpoints.forEach(endpoint => {
+                        endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
+                            <div class="endpoint-path">${endpoint}</div>
+                            <div class="endpoint-url">${currentDomain}${endpoint}</div>
+                        </div>`;
+                    });
+                }
             } else {
-                // 如果没有数据，显示所有端点（前8个）
+                // 如果没有统计数据，显示所有端点（前8个）
                 const endpoints = Object.keys(apiMapping).slice(0, 8);
                 endpoints.forEach(endpoint => {
                     endpointListHTML += `<div class="endpoint-item" title="点击复制完整地址">
@@ -333,13 +310,7 @@ https://api.anthropic.com/v1/messages
             });
         }
 
-        // 更新性能信息
-        function updatePerformanceInfo(performance) {
-            const qps = (performance.requests_per_sec || 0).toFixed(2);
-            const memory = (performance.memory_usage_mb || 0).toFixed(2);
-            const info = `高性能实时统计与使用指南 - QPS: ${qps} | 平均响应: ${performance.avg_response_time_ms || 0}ms | 内存: ${memory}MB`;
-            document.getElementById('performance-info').textContent = info;
-        }
+     
 
         // 更新域名相关的显示
         function updateDomainReferences() {
@@ -347,8 +318,6 @@ https://api.anthropic.com/v1/messages
             document.getElementById('js-example-domain').textContent = currentDomain;
             document.getElementById('gemini-example-domain').textContent = currentDomain;
             document.getElementById('claude-example-domain').textContent = currentDomain;
-            document.getElementById('stats-api-url').textContent = `${currentDomain}/stats`;
-            document.getElementById('stats-example-domain').textContent = currentDomain;
         }
 
         // 图表相关函数
@@ -616,7 +585,6 @@ https://api.anthropic.com/v1/messages
             const data = await loadStatsData();
             if (data) {
                 renderStatsCards(data);
-                updatePerformanceInfo(data.performance);
                 populateEndpointSelector();
                 renderEndpointList();
                 createCombinedChart(currentPeriod);
@@ -629,10 +597,13 @@ https://api.anthropic.com/v1/messages
             currentDomain = getCurrentDomain();
             updateDomainReferences();
 
+            // 先加载API映射配置
+            await loadAPIMappings();
+
+            // 再加载统计数据
             const data = await loadStatsData();
             if (data) {
                 renderStatsCards(data);
-                updatePerformanceInfo(data.performance);
                 populateEndpointSelector();
                 renderEndpointList();
                 createCombinedChart(currentPeriod);
