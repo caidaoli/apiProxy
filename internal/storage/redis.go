@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"sort"
@@ -558,6 +559,11 @@ func (m *MappingManager) Close() error {
 }
 
 // validateMapping 验证映射的有效性
+// isPrivateIP 检查IP是否为私有地址
+func isPrivateIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
 func validateMapping(prefix, target string) error {
 	// 验证前缀格式
 	if prefix == "" {
@@ -588,6 +594,17 @@ func validateMapping(prefix, target string) error {
 
 	if parsedURL.Host == "" {
 		return errors.New("target URL must have a valid host")
+	}
+
+	// SSRF 防护: 检查目标是否解析到私有 IP
+	host := parsedURL.Hostname()
+	ips, err := net.LookupIP(host)
+	if err == nil {
+		for _, ip := range ips {
+			if isPrivateIP(ip) {
+				return fmt.Errorf("target URL resolves to private IP: %s", ip)
+			}
+		}
 	}
 
 	return nil

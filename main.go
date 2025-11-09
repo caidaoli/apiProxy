@@ -78,6 +78,10 @@ func main() {
 	// 添加恢复中间件
 	r.Use(gin.Recovery())
 
+	// 添加速率限制中间件（1000 req/s）
+	rateLimiter := middleware.NewRateLimiter(1000)
+	r.Use(rateLimiter.Middleware())
+
 	// 可选：添加统计中间件
 	if os.Getenv("ENABLE_STATS") != "false" {
 		statsMiddleware := middleware.NewStatsMiddleware(statsCollector)

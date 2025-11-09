@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -54,7 +55,7 @@ func (h *Handler) authMiddleware() gin.HandlerFunc {
 		}
 
 		token := h.getSessionToken(c)
-		if token == "" || token != h.adminToken {
+		if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(h.adminToken)) != 1 {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Invalid admin token",
 			})
