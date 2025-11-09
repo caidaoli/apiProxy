@@ -1,14 +1,24 @@
 package stats
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"math"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+)
+
+// Redis存储相关常量
+const (
+	KeyStatsCounters       = "api_proxy:stats:counters"
+	KeyStatsEndpointPrefix = "api_proxy:stats:endpoints:"
 )
 
 // EndpointStats 端点统计信息
@@ -63,10 +73,11 @@ type Collector struct {
 	responseTimeCount int64
 	lastQPSUpdate     int64
 	lastRequestCount  int64
+	redisClient       *redis.Client // Redis客户端用于持久化
 }
 
 // NewCollector 创建统计收集器
-func NewCollector() *Collector {
+func NewCollector(redisClient *redis.Client) *Collector {
 	c := &Collector{
 		stats: &Stats{
 			Endpoints: make(map[string]*EndpointStats),
@@ -79,6 +90,16 @@ func NewCollector() *Collector {
 		perfMetrics: &PerformanceMetrics{
 			LastUpdated: time.Now().UnixMilli(),
 		},
+		redisClient: redisClient,
+	}
+
+	// 从Redis加载历史统计数据
+	if redisClient != nil {
+		if err := c.LoadFromRedis(context.Background()); err != nil {
+			log.Printf("⚠️  Failed to load stats from Redis: %v (starting with fresh stats)", err)
+		} else {
+			log.Println("✅ 统计数据已从Redis恢复")
+		}
 	}
 
 	// 启动统计更新协程
@@ -98,6 +119,22 @@ func NewCollector() *Collector {
 			c.updatePerformanceMetrics()
 		}
 	}()
+
+	// 启动定时保存到Redis的协程
+	if redisClient != nil {
+		go func() {
+			ticker := time.NewTicker(1 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				if err := c.SaveToRedis(context.Background()); err != nil {
+					log.Printf("❌ Failed to save stats to Redis: %v", err)
+				} else {
+					log.Println("💾 统计数据已保存到Redis")
+				}
+			}
+		}()
+		log.Println("🔄 统计数据自动保存已启用 (每1分钟)")
+	}
 
 	log.Println("📊 统计收集器已初始化")
 	return c
@@ -367,4 +404,134 @@ func (c *Collector) GetRequestCount() *int64 {
 func (c *Collector) UpdateResponseMetrics(responseTime int64) {
 	atomic.AddInt64(&c.responseTimeSum, responseTime)
 	atomic.AddInt64(&c.responseTimeCount, 1)
+}
+
+// SaveToRedis 保存统计数据到Redis
+func (c *Collector) SaveToRedis(ctx context.Context) error {
+	if c.redisClient == nil {
+		return fmt.Errorf("redis client is not initialized")
+	}
+
+	pipe := c.redisClient.Pipeline()
+
+	// 保存全局计数器
+	counters := map[string]interface{}{
+		"request_count":       atomic.LoadInt64(&c.requestCount),
+		"error_count":         atomic.LoadInt64(&c.errorCount),
+		"response_time_sum":   atomic.LoadInt64(&c.responseTimeSum),
+		"response_time_count": atomic.LoadInt64(&c.responseTimeCount),
+		"total":               c.stats.Total,
+		"last_update":         time.Now().Unix(),
+	}
+	pipe.HSet(ctx, KeyStatsCounters, counters)
+
+	// 保存每个endpoint的统计数据
+	c.stats.mu.RLock()
+	for prefix, stats := range c.stats.Endpoints {
+		endpointKey := KeyStatsEndpointPrefix + prefix
+		endpointData := map[string]interface{}{
+			"total": stats.Total,
+			"today": stats.Today,
+			"week":  stats.Week,
+			"month": stats.Month,
+		}
+		pipe.HSet(ctx, endpointKey, endpointData)
+	}
+	c.stats.mu.RUnlock()
+
+	// 执行批量操作
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// LoadFromRedis 从Redis加载统计数据
+func (c *Collector) LoadFromRedis(ctx context.Context) error {
+	if c.redisClient == nil {
+		return fmt.Errorf("redis client is not initialized")
+	}
+
+	// 加载全局计数器
+	counters, err := c.redisClient.HGetAll(ctx, KeyStatsCounters).Result()
+	if err != nil {
+		return fmt.Errorf("failed to load counters: %w", err)
+	}
+
+	// 如果没有数据，返回nil（不是错误）
+	if len(counters) == 0 {
+		return nil
+	}
+
+	// 恢复计数器
+	if val, ok := counters["request_count"]; ok {
+		if count, err := strconv.ParseInt(val, 10, 64); err == nil {
+			atomic.StoreInt64(&c.requestCount, count)
+		}
+	}
+	if val, ok := counters["error_count"]; ok {
+		if count, err := strconv.ParseInt(val, 10, 64); err == nil {
+			atomic.StoreInt64(&c.errorCount, count)
+		}
+	}
+	if val, ok := counters["response_time_sum"]; ok {
+		if sum, err := strconv.ParseInt(val, 10, 64); err == nil {
+			atomic.StoreInt64(&c.responseTimeSum, sum)
+		}
+	}
+	if val, ok := counters["response_time_count"]; ok {
+		if count, err := strconv.ParseInt(val, 10, 64); err == nil {
+			atomic.StoreInt64(&c.responseTimeCount, count)
+		}
+	}
+	if val, ok := counters["total"]; ok {
+		if total, err := strconv.ParseInt(val, 10, 64); err == nil {
+			c.stats.Total = total
+		}
+	}
+
+	// 加载所有endpoint统计数据
+	keys, err := c.redisClient.Keys(ctx, KeyStatsEndpointPrefix+"*").Result()
+	if err != nil {
+		return fmt.Errorf("failed to get endpoint keys: %w", err)
+	}
+
+	c.stats.mu.Lock()
+	defer c.stats.mu.Unlock()
+
+	for _, key := range keys {
+		prefix := key[len(KeyStatsEndpointPrefix):]
+		data, err := c.redisClient.HGetAll(ctx, key).Result()
+		if err != nil {
+			log.Printf("⚠️  Failed to load stats for endpoint %s: %v", prefix, err)
+			continue
+		}
+
+		stats := &EndpointStats{}
+		if val, ok := data["total"]; ok {
+			if total, err := strconv.ParseInt(val, 10, 64); err == nil {
+				stats.Total = total
+			}
+		}
+		if val, ok := data["today"]; ok {
+			if today, err := strconv.ParseInt(val, 10, 64); err == nil {
+				stats.Today = today
+			}
+		}
+		if val, ok := data["week"]; ok {
+			if week, err := strconv.ParseInt(val, 10, 64); err == nil {
+				stats.Week = week
+			}
+		}
+		if val, ok := data["month"]; ok {
+			if month, err := strconv.ParseInt(val, 10, 64); err == nil {
+				stats.Month = month
+			}
+		}
+
+		c.stats.Endpoints[prefix] = stats
+	}
+
+	loadedEndpoints := len(keys)
+	log.Printf("📊 从Redis恢复了 %d 个endpoint的统计数据", loadedEndpoints)
+
+	return nil
 }

@@ -48,8 +48,8 @@ func main() {
 	}
 	defer mappingManager.Close()
 
-	// 初始化统计系统
-	statsCollector := stats.NewCollector()
+	// 初始化统计系统（复用Redis连接）
+	statsCollector := stats.NewCollector(mappingManager.GetClient())
 
 	// 创建代理处理器
 	proxyHandler := proxy.NewHandler(
@@ -138,7 +138,16 @@ func main() {
 
 	log.Println("正在关闭服务器...")
 
-	// 优雅关闭
+	// 保存统计数据到Redis
+	saveCtx, saveCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := statsCollector.SaveToRedis(saveCtx); err != nil {
+		log.Printf("❌ 关闭时保存统计数据失败: %v", err)
+	} else {
+		log.Println("💾 统计数据已保存到Redis")
+	}
+	saveCancel()
+
+	// 优雅关闭HTTP服务器
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

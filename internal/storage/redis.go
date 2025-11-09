@@ -373,6 +373,11 @@ func (m *MappingManager) GetVersion() int64 {
 	return m.version.Load()
 }
 
+// GetClient 返回Redis客户端（用于其他模块复用连接）
+func (m *MappingManager) GetClient() *redis.Client {
+	return m.client
+}
+
 // Close 关闭Redis连接
 func (m *MappingManager) Close() error {
 	if m.client != nil {
