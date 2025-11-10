@@ -35,7 +35,7 @@ func BenchmarkTransparentProxy(b *testing.B) {
 	defer backend.Close()
 
 	// 创建透明代理
-	proxy := NewTransparentProxy(mockMappingManager{targetURL: backend.URL})
+	proxy := NewTransparentProxy(mockMappingManager{targetURL: backend.URL}, nil)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -63,7 +63,7 @@ func BenchmarkLargeBody(b *testing.B) {
 	}))
 	defer backend.Close()
 
-	proxy := NewTransparentProxy(mockMappingManager{targetURL: backend.URL})
+	proxy := NewTransparentProxy(mockMappingManager{targetURL: backend.URL}, nil)
 
 	// 10MB请求体
 	largeBody := make([]byte, 10*1024*1024)

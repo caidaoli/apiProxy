@@ -2,6 +2,8 @@ package stats
 
 import (
 	"context"
+	"encoding/json"
+	"log"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -246,15 +248,34 @@ func (c *Collector) SaveToRedis(ctx context.Context) error {
 	pipe.Set(ctx, "stats:request_count", c.GetRequestCount(), 0)
 	pipe.Set(ctx, "stats:error_count", c.GetErrorCount(), 0)
 
-	// 保存端点统计
+	// 保存端点统计（统一序列化为JSON，避免分散的Hash keys）
 	stats := c.GetStats()
-	for endpoint, stat := range stats {
-		key := "stats:endpoint:" + endpoint
-		pipe.HSet(ctx, key, map[string]any{
-			"count":        stat.Count,
-			"error_count":  stat.ErrorCount,
-			"last_request": stat.LastRequest,
-		})
+	if len(stats) > 0 {
+		endpointsData, err := json.Marshal(stats)
+		if err == nil {
+			pipe.Set(ctx, "stats:endpoints", endpointsData, 7*24*time.Hour)
+		}
+	}
+
+	// 保存时间序列数据（最近48小时）
+	requests := c.GetRequests()
+	if len(requests) > 0 {
+		// 只保存最近48小时的数据（约2000-5000条记录）
+		cutoff := time.Now().Unix() - 48*3600
+		recentRequests := make([]RequestRecord, 0, len(requests))
+		for _, req := range requests {
+			if req.Timestamp >= cutoff {
+				recentRequests = append(recentRequests, req)
+			}
+		}
+
+		// 使用JSON序列化保存到Redis（7天过期）
+		if len(recentRequests) > 0 {
+			data, err := json.Marshal(recentRequests)
+			if err == nil {
+				pipe.Set(ctx, "stats:requests_timeline", data, 7*24*time.Hour)
+			}
+		}
 	}
 
 	_, err := pipe.Exec(ctx)
@@ -273,6 +294,30 @@ func (c *Collector) LoadFromRedis(ctx context.Context) error {
 
 	atomic.StoreInt64(&c.requestCount, requestCount)
 	atomic.StoreInt64(&c.errorCount, errorCount)
+
+	// 加载端点统计数据
+	endpointsData, err := c.redisClient.Get(ctx, "stats:endpoints").Bytes()
+	if err == nil && len(endpointsData) > 0 {
+		var endpoints map[string]*EndpointStats
+		if err := json.Unmarshal(endpointsData, &endpoints); err == nil {
+			c.mu.Lock()
+			c.endpoints = endpoints
+			c.mu.Unlock()
+			log.Printf("📊 从Redis恢复了 %d 个端点的统计数据", len(endpoints))
+		}
+	}
+
+	// 加载时间序列数据
+	data, err := c.redisClient.Get(ctx, "stats:requests_timeline").Bytes()
+	if err == nil && len(data) > 0 {
+		var requests []RequestRecord
+		if err := json.Unmarshal(data, &requests); err == nil {
+			c.requestsMu.Lock()
+			c.requests = requests
+			c.requestsMu.Unlock()
+			log.Printf("📊 从Redis恢复了 %d 条历史请求记录", len(requests))
+		}
+	}
 
 	return nil
 }

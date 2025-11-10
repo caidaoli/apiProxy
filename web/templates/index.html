@@ -211,7 +211,7 @@ https://api.anthropic.com/v1/messages
         // 渲染统计卡片
         function renderStatsCards(data) {
             const activeEndpoints = Object.keys(data.endpoints || {}).filter(k =>
-                data.endpoints[k].total > 0
+                data.endpoints[k].count > 0
             ).length;
 
             // 性能等级CSS类
@@ -279,8 +279,8 @@ https://api.anthropic.com/v1/messages
             // 获取有数据的端点并按调用次数排序，取前8个
             if (rawStatsData && rawStatsData.endpoints && Object.keys(rawStatsData.endpoints).length > 0) {
                 const activeEndpoints = Object.keys(rawStatsData.endpoints)
-                    .filter(ep => rawStatsData.endpoints[ep].total > 0)
-                    .sort((a, b) => rawStatsData.endpoints[b].total - rawStatsData.endpoints[a].total)
+                    .filter(ep => rawStatsData.endpoints[ep].count > 0)
+                    .sort((a, b) => rawStatsData.endpoints[b].count - rawStatsData.endpoints[a].count)
                     .slice(0, 8);
 
                 // 如果有活跃端点，显示活跃端点；否则显示所有映射的端点
@@ -346,44 +346,56 @@ https://api.anthropic.com/v1/messages
 
             if (period === 'today') {
                 const hourlyCounts = Array(24).fill(0);
+                // 计算24小时前的整点时间（本地时区）
+                const nowDate = new Date(now);
                 const firstHourTimestamp = new Date(now - 23 * 60 * 60 * 1000);
                 firstHourTimestamp.setMinutes(0, 0, 0);
+                const firstHourTime = firstHourTimestamp.getTime();
 
+                // 生成24个小时标签
                 for (let i = 0; i < 24; i++) {
-                    const hour = new Date(firstHourTimestamp);
-                    hour.setHours(firstHourTimestamp.getHours() + i);
+                    const hourTime = firstHourTime + i * 60 * 60 * 1000;
+                    const hour = new Date(hourTime);
                     labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
                 }
 
-                const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
-                filteredRequests.filter(req => (req.timestamp * 1000) >= twentyFourHoursAgo)
+                // 过滤并统计过去24小时的请求
+                const twentyFourHoursAgo = firstHourTime;
+                filteredRequests
+                    .filter(req => (req.timestamp * 1000) >= twentyFourHoursAgo)
                     .forEach(req => {
-                        const reqHour = new Date(req.timestamp * 1000);
-                        const diffHours = Math.floor((reqHour.getTime() - firstHourTimestamp.getTime()) / (60 * 60 * 1000));
+                        const reqTime = req.timestamp * 1000;
+                        const diffHours = Math.floor((reqTime - firstHourTime) / (60 * 60 * 1000));
                         if (diffHours >= 0 && diffHours < 24) {
                             hourlyCounts[diffHours]++;
                         }
                     });
+
                 aggregatedData = hourlyCounts;
             } else if (period === 'week' || period === 'month') {
                 const numDays = period === 'week' ? 7 : 30;
                 const dailyCounts = Array(numDays).fill(0);
+                // 计算起始日期的0点时间（本地时区）
                 const firstDayTimestamp = new Date(now);
                 firstDayTimestamp.setDate(firstDayTimestamp.getDate() - (numDays - 1));
                 firstDayTimestamp.setHours(0, 0, 0, 0);
+                const firstDayTime = firstDayTimestamp.getTime();
 
+                // 生成日期标签
                 for (let i = 0; i < numDays; i++) {
-                    const day = new Date(firstDayTimestamp);
-                    day.setDate(firstDayTimestamp.getDate() + i);
+                    const dayTime = firstDayTime + i * 24 * 60 * 60 * 1000;
+                    const day = new Date(dayTime);
                     labels.push(day.getFullYear() + '-' + (day.getMonth() + 1).toString().padStart(2, '0') + '-' + day.getDate().toString().padStart(2, '0'));
                 }
 
-                const periodStartTimestamp = firstDayTimestamp.getTime();
-                filteredRequests.filter(req => (req.timestamp * 1000) >= periodStartTimestamp)
+                // 过滤并统计请求
+                filteredRequests
+                    .filter(req => (req.timestamp * 1000) >= firstDayTime)
                     .forEach(req => {
-                        const reqDay = new Date(req.timestamp * 1000);
-                        reqDay.setHours(0,0,0,0);
-                        const diffDays = Math.floor((reqDay.getTime() - firstDayTimestamp.getTime()) / (24 * 60 * 60 * 1000));
+                        const reqTime = req.timestamp * 1000;
+                        const reqDay = new Date(reqTime);
+                        reqDay.setHours(0, 0, 0, 0);
+                        const diffDays = Math.floor((reqDay.getTime() - firstDayTime) / (24 * 60 * 60 * 1000));
                         if (diffDays >= 0 && diffDays < numDays) {
                            dailyCounts[diffDays]++;
                         }
@@ -391,14 +403,14 @@ https://api.anthropic.com/v1/messages
                 aggregatedData = dailyCounts;
             } else if (period === 'total') {
                 if (selectedEndpoint === 'all') {
-                    const activeEndpoints = Object.keys(endpointDetails).filter(ep => endpointDetails[ep].total > 0);
+                    const activeEndpoints = Object.keys(endpointDetails).filter(ep => endpointDetails[ep].count > 0);
                     labels = activeEndpoints.map(ep => ep.replace('/', ''));
-                    aggregatedData = activeEndpoints.map(ep => endpointDetails[ep].total);
+                    aggregatedData = activeEndpoints.map(ep => endpointDetails[ep].count);
                 } else {
-                    // 对于特定端点，显示不同时间段的数据
-                    labels = ['24小时', '7天', '30天', '总计'];
-                    const stats = endpointDetails[selectedEndpoint] || { today: 0, week: 0, month: 0, total: 0 };
-                    aggregatedData = [stats.today, stats.week, stats.month, stats.total];
+                    // 对于特定端点，只显示总计数
+                    labels = ['总计'];
+                    const stats = endpointDetails[selectedEndpoint] || { count: 0 };
+                    aggregatedData = [stats.count];
                 }
             }
             return { labels, data: aggregatedData };
@@ -529,13 +541,13 @@ https://api.anthropic.com/v1/messages
 
             if (rawStatsData && rawStatsData.endpoints) {
                 const activeEndpoints = Object.keys(rawStatsData.endpoints)
-                    .filter(ep => rawStatsData.endpoints[ep].total > 0)
+                    .filter(ep => rawStatsData.endpoints[ep].count > 0)
                     .sort();
 
                 activeEndpoints.forEach(endpoint => {
                     const option = document.createElement('option');
                     option.value = endpoint;
-                    option.textContent = endpoint.replace('/', '') + ' (' + rawStatsData.endpoints[endpoint].total + '次)';
+                    option.textContent = endpoint.replace('/', '') + ' (' + rawStatsData.endpoints[endpoint].count + '次)';
                     selector.appendChild(option);
                 });
             }

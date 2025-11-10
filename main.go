@@ -53,8 +53,17 @@ func main() {
 	statsCollector := stats.NewCollector(mappingManager.GetClient())
 	defer statsCollector.Close()
 
-	// 创建透明代理
-	transparentProxy := proxy.NewTransparentProxy(mappingManager)
+	// 从Redis恢复历史统计数据
+	if err := statsCollector.LoadFromRedis(ctx); err != nil {
+		log.Printf("⚠️  从Redis加载历史数据失败: %v", err)
+	}
+
+	// 创建透明代理（传入统计收集器，只记录代理请求）
+	var collector proxy.MetricsCollector
+	if os.Getenv("ENABLE_STATS") != "false" {
+		collector = statsCollector
+	}
+	transparentProxy := proxy.NewTransparentProxy(mappingManager, collector)
 
 	// 创建路由
 	r := gin.New()
@@ -81,12 +90,6 @@ func main() {
 	// 添加速率限制中间件（1000 req/s）
 	rateLimiter := middleware.NewRateLimiter(1000)
 	r.Use(rateLimiter.Middleware())
-
-	// 可选：添加统计中间件
-	if os.Getenv("ENABLE_STATS") != "false" {
-		statsMiddleware := middleware.NewStatsMiddleware(statsCollector)
-		r.Use(statsMiddleware.Handler())
-	}
 
 	// 基础路由
 	r.GET("/", handleIndex)

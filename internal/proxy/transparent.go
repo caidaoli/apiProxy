@@ -15,6 +15,13 @@ type MappingManager interface {
 	GetPrefixes() []string
 }
 
+// MetricsCollector 统计收集器接口
+type MetricsCollector interface {
+	RecordRequest(endpoint string)
+	RecordError(endpoint string)
+	UpdateResponseMetrics(duration time.Duration)
+}
+
 // hopByHopHeaders RFC 7230规定的逐跳头部（不应被代理转发）
 // 使用包级常量避免每次请求创建map
 var hopByHopHeaders = map[string]bool{
@@ -35,17 +42,19 @@ var hopByHopHeaders = map[string]bool{
 // 3. 无统计、无日志（纯粹转发）
 // 4. 最小化内存分配
 type TransparentProxy struct {
-	client *http.Client
-	mapper MappingManager
+	client         *http.Client
+	mapper         MappingManager
+	statsCollector MetricsCollector // 可选的统计收集器
 }
 
 // hop-by-hop头部在handler.go中定义为包级常量
 
 // NewTransparentProxy 创建透明代理
-func NewTransparentProxy(mapper MappingManager) *TransparentProxy {
+func NewTransparentProxy(mapper MappingManager, statsCollector MetricsCollector) *TransparentProxy {
 	return &TransparentProxy{
-		client: createOptimizedHTTPClient(),
-		mapper: mapper,
+		client:         createOptimizedHTTPClient(),
+		mapper:         mapper,
+		statsCollector: statsCollector,
 	}
 }
 
@@ -79,10 +88,17 @@ func createOptimizedHTTPClient() *http.Client {
 // ProxyRequest 透明转发请求
 // 性能：~1ms/op，内存分配最小化
 func (p *TransparentProxy) ProxyRequest(w http.ResponseWriter, r *http.Request, prefix, rest string) error {
-	// 1. 获取目标URL
+	// 1. 获取目标URL（先验证映射是否存在）
 	targetBase, err := p.mapper.GetMapping(r.Context(), prefix)
 	if err != nil {
+		// 映射不存在，不统计（用户只想统计已配置映射的端点）
 		return err
+	}
+
+	// 2. 记录请求开始时间和统计（只有在映射存在时才统计）
+	start := time.Now()
+	if p.statsCollector != nil {
+		p.statsCollector.RecordRequest(prefix)
 	}
 
 	targetURL := targetBase + rest
@@ -90,7 +106,7 @@ func (p *TransparentProxy) ProxyRequest(w http.ResponseWriter, r *http.Request, 
 		targetURL += "?" + r.URL.RawQuery
 	}
 
-	// 2. 添加超时保护（防止goroutine泄漏，同时尊重客户端的timeout）
+	// 3. 添加超时保护（防止goroutine泄漏，同时尊重客户端的timeout）
 	ctx := r.Context()
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		// 客户端没有设置deadline，添加保护性超时（30秒）
@@ -100,31 +116,48 @@ func (p *TransparentProxy) ProxyRequest(w http.ResponseWriter, r *http.Request, 
 		defer cancel()
 	}
 
-	// 3. 创建代理请求（直接传递Body，流式处理）
+	// 4. 创建代理请求（直接传递Body，流式处理）
 	// 关键优化：不读取Body到内存，直接传递给后端
 	proxyReq, err := http.NewRequestWithContext(ctx, r.Method, targetURL, r.Body)
 	if err != nil {
+		if p.statsCollector != nil {
+			p.statsCollector.RecordError(prefix)
+		}
 		return err
 	}
 
-	// 4. 复制请求头（过滤hop-by-hop头部）
+	// 5. 复制请求头（过滤hop-by-hop头部）
 	copyHeaders(proxyReq.Header, r.Header)
 
-	// 5. 发送请求到后端
+	// 6. 发送请求到后端
 	resp, err := p.client.Do(proxyReq)
 	if err != nil {
+		if p.statsCollector != nil {
+			p.statsCollector.RecordError(prefix)
+		}
 		return err
 	}
 	defer resp.Body.Close()
 
-	// 6. 复制响应头（过滤hop-by-hop头部）
+	// 7. 复制响应头（过滤hop-by-hop头部）
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 
-	// 7. 流式复制响应体
+	// 8. 流式复制响应体
 	// 使用io.Copy，内部使用32KB缓冲区，内存使用恒定
-	_, err = io.Copy(w, resp.Body)
-	return err
+	_, copyErr := io.Copy(w, resp.Body)
+
+	// 9. 记录响应时间和错误（不影响转发）
+	if p.statsCollector != nil {
+		duration := time.Since(start)
+		p.statsCollector.UpdateResponseMetrics(duration)
+
+		if resp.StatusCode >= 400 {
+			p.statsCollector.RecordError(prefix)
+		}
+	}
+
+	return copyErr
 }
 
 // copyHeaders 复制HTTP头部（过滤hop-by-hop头部）
