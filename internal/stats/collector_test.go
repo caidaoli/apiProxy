@@ -353,17 +353,17 @@ func TestCollector_GetPerformanceMetrics(t *testing.T) {
 
 	// 记录一些请求和错误
 	c.RecordRequest("/api/test")
-	c.UpdateResponseMetrics(100*time.Millisecond)
+	c.UpdateResponseMetrics(100 * time.Millisecond)
 
 	c.RecordRequest("/api/test")
-	c.UpdateResponseMetrics(200*time.Millisecond)
-	
+	c.UpdateResponseMetrics(200 * time.Millisecond)
+
 	c.RecordRequest("/api/test")
 	c.RecordError("/api/test")
 
 	// 等待缓存过期后再获取
 	time.Sleep(6 * time.Second)
-	
+
 	metrics := c.GetPerformanceMetrics()
 	if metrics == nil {
 		t.Fatal("metrics should not be nil")
@@ -379,16 +379,17 @@ func TestCollector_GetPerformanceMetrics(t *testing.T) {
 	if metrics.ErrorRate < expectedErrorRate-1 || metrics.ErrorRate > expectedErrorRate+1 {
 		t.Errorf("expected error rate ~%.2f%%, got %.2f%%", expectedErrorRate, metrics.ErrorRate)
 	}
-	
+
 	// 验证内存和协程数据存在
 	if metrics.MemoryUsageMB <= 0 {
 		t.Error("memory usage should be > 0")
 	}
-	
+
 	if metrics.GoroutineCount <= 0 {
 		t.Error("goroutine count should be > 0")
 	}
 }
+
 // TestCollector_GetPerformanceMetrics_Cache 测试性能指标缓存
 func TestCollector_GetPerformanceMetrics_Cache(t *testing.T) {
 	c := NewCollector(nil)
@@ -397,7 +398,7 @@ func TestCollector_GetPerformanceMetrics_Cache(t *testing.T) {
 
 	// 第一次调用
 	metrics1 := c.GetPerformanceMetrics()
-	
+
 	// 立即第二次调用应该返回缓存
 	metrics2 := c.GetPerformanceMetrics()
 
@@ -408,7 +409,7 @@ func TestCollector_GetPerformanceMetrics_Cache(t *testing.T) {
 
 	// 等待缓存过期
 	time.Sleep(6 * time.Second)
-	
+
 	// 再次调用应该重新计算
 	metrics3 := c.GetPerformanceMetrics()
 	if metrics1 == metrics3 {
@@ -456,4 +457,3 @@ func TestCollector_SaveAndLoadRedis(t *testing.T) {
 			c1.GetErrorCount(), c2.GetErrorCount())
 	}
 }
-

@@ -250,7 +250,7 @@ func (c *Collector) SaveToRedis(ctx context.Context) error {
 	stats := c.GetStats()
 	for endpoint, stat := range stats {
 		key := "stats:endpoint:" + endpoint
-		pipe.HSet(ctx, key, map[string]interface{}{
+		pipe.HSet(ctx, key, map[string]any{
 			"count":        stat.Count,
 			"error_count":  stat.ErrorCount,
 			"last_request": stat.LastRequest,

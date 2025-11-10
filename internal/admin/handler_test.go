@@ -134,7 +134,7 @@ func TestHandler_GetAllMappings(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	json.Unmarshal(w.Body.Bytes(), &response)
 
 	if response["success"] != true {
@@ -170,7 +170,7 @@ func TestHandler_GetPublicMappings(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	json.Unmarshal(w.Body.Bytes(), &response)
 
 	if response["success"] != true {
@@ -454,7 +454,7 @@ func TestHandler_AdminLogin_Success(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	json.Unmarshal(w.Body.Bytes(), &response)
 
 	if response["success"] != true {
