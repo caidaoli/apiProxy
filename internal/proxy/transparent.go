@@ -93,10 +93,10 @@ func (p *TransparentProxy) ProxyRequest(w http.ResponseWriter, r *http.Request, 
 	// 2. 添加超时保护（防止goroutine泄漏，同时尊重客户端的timeout）
 	ctx := r.Context()
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		// 客户端没有设置deadline，添加保护性超时（1小时）
+		// 客户端没有设置deadline，添加保护性超时（30秒）
 		// 这不违反透明代理原则，因为这是资源保护而非业务超时
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 1*time.Hour)
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 	}
 

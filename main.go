@@ -177,26 +177,23 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
-	log.Println("正在关闭服务器...")
+	log.Println("Shutting down...")
 
-	// 保存统计数据到Redis（可选）
-	saveCtx, saveCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer saveCancel()
-	if err := statsCollector.SaveToRedis(saveCtx); err != nil {
-		log.Printf("❌ 关闭时保存统计数据失败: %v", err)
-	} else {
-		log.Println("📊 统计数据已保存到Redis")
-	}
-
-	// 优雅关闭HTTP服务器
+	// 5 秒内完成所有关闭操作
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// 优雅关闭HTTP服务器
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatal("服务器强制关闭:", err)
+		log.Printf("Server shutdown error: %v", err)
 	}
 
-	log.Println("服务器已关闭")
+	// 保存统计（best effort，不影响关闭）
+	if err := statsCollector.SaveToRedis(ctx); err != nil {
+		log.Printf("Stats save error: %v", err)
+	}
+
+	log.Println("Shutdown complete")
 }
 
 // handleIndex 处理首页
